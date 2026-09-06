@@ -4,7 +4,7 @@
 
 ## 📝 Overview
 
-**Neko Game** is a tailored gacha analysis and game management application designed to enhance your gaming experience. It features a modern, customizable user interface to help you record, analyze, and optimize your gaming activities. Built on **Electron**, the app integrates various useful functionalities such as gacha analysis for **Wuthering Waves, Genshin Impact, Honkai Star Rail, and Zenless Zone Zero**, game time tracking, time trend visualization, and more.
+**Neko Game** is a tailored gacha analysis and game management application designed to enhance your gaming experience. It features a modern, customizable user interface to help you record, analyze, and optimize your gaming activities. Built on **Electron**, the app integrates various useful functionalities such as gacha analysis for **Genshin Impact, Honkai Star Rail, and Zenless Zone Zero**, game time tracking, time trend visualization, and more.
 
 > **Recommended Reading**: Spend 5 minutes reading this document to quickly get started with Neko Game.
 
@@ -12,8 +12,8 @@
 
 ## Features
 - **Game Tracking**: Automatically tracks and records game playtime with detailed statistics.
-- **Gacha Analysis**: One-click analysis for gacha data from Wuthering Waves, Honkai Star Rail, Genshin Impact, and Zenless Zone Zero. Links are automatically copied.
-- **Gacha Data Import/Export**: Supports UIGF 4.0 export/import for Genshin, Honkai Star Rail, and Zenless Zone Zero. Wuthering Waves data can be exported to Excel.
+- **Gacha Analysis**: One-click analysis for gacha data from Honkai Star Rail, Genshin Impact, and Zenless Zone Zero. Links are automatically copied.
+- **Gacha Data Import/Export**: Supports UIGF 4.0 export/import for Genshin, Honkai Star Rail, and Zenless Zone Zero.
 - **Game Library Management**: Easily add, edit, and delete games from your library for tracking.
 - **Data Analysis**: Visualize trends and gain insights into your gaming habits through rich analytics.
 - **Seamless Usage**: Minimize to system tray, run in the background, and enable auto-start at login.

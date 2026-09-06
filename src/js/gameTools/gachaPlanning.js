@@ -22,14 +22,6 @@ async function renderGameCards() {
       recordMethod: "get-starRail-gacha-records",
     },
     {
-      name: "鸣潮",
-      repo: "wuWa.json",
-      currencyName: "星声",
-      uidMethod: "get-player-uids",
-      lastUidMethod: "get-last-query-uid",
-      recordMethod: "get-gacha-records",
-    },
-    {
       name: "绝区零",
       repo: "ZZZ.json",
       currencyName: "菲林",
@@ -159,8 +151,8 @@ async function renderGameCards() {
 }
 
 function updateCardWithPoolAverages(card, categorizedRecords, gameName) {
-  const CHARACTER_POOLS = ["角色活动跃迁", "角色活动唤取", "角色活动祈愿", "独家频段"];
-  const WEAPON_POOLS = ["光锥活动跃迁", "武器活动祈愿", "音擎频段", "武器活动唤取"];
+  const CHARACTER_POOLS = ["角色活动跃迁", "角色活动祈愿", "独家频段"];
+  const WEAPON_POOLS = ["光锥活动跃迁", "武器活动祈愿", "音擎频段"];
 
   const characterPools = CHARACTER_POOLS.filter(pool => Array.isArray(categorizedRecords[pool]));
   const weaponPools = WEAPON_POOLS.filter(pool => Array.isArray(categorizedRecords[pool]));
@@ -212,9 +204,7 @@ function updateCardWithPoolAverages(card, categorizedRecords, gameName) {
 
 async function loadUidRecords(uid, game) {
   const records = await window.electronAPI.invoke(game.recordMethod);
-  // 根据游戏类型选择过滤字段
-  const idField = game.name === "鸣潮" ? "player_id" : "uid";
-  return records.filter((record) => record[idField] === uid);
+  return records.filter((record) => record.uid === uid);
 }
 
 

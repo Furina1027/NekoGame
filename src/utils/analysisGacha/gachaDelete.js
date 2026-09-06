@@ -7,7 +7,6 @@ const ALLOWED_GACHA_TABLES = new Set([
     'genshin_gacha',
     'starRail_gacha',
     'zzz_gacha',
-    'gacha_logs',
     'miliastra_gacha'
 ]);
 
@@ -65,7 +64,7 @@ async function getUidColumn(table) {
   const names = new Set(cols.map(c => c.name));
 
   // 优先自动探测（推荐顺序）
-  const candidates = ['uid', 'player_id', 'user_id', 'account_id'];
+  const candidates = ['uid', 'user_id', 'account_id'];
   for (const c of candidates) {
     if (names.has(c)) return c;
   }
@@ -75,7 +74,6 @@ async function getUidColumn(table) {
     genshin_gacha: 'uid',
     starRail_gacha: 'uid',
     zzz_gacha: 'uid',
-    gacha_logs: 'player_id',
     miliastra_logs: 'uid'
   };
   return map[table] || null;
@@ -106,7 +104,7 @@ async function normalizePayload(payload) {
 
   const uidCol = await getUidColumn(table);
   if (!uidCol) {
-    return { ok: false, message: `表 ${table} 未找到可用 UID 列（uid/player_id/...）` };
+    return { ok: false, message: `表 ${table} 未找到可用 UID 列（uid/user_id/account_id）` };
   }
 
   return { ok: true, uid, table, uidCol, timeCol, s, e };

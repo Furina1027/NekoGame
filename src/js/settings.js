@@ -119,11 +119,6 @@
                 animationMessage(false, '恢复默认设置失败');
             });
     });
-    document.getElementById('exportWuWa').addEventListener('click', async () => {
-        const result = await window.electronAPI.invoke('exportGachaData');
-        animationMessage(result.success, result.message);
-    });
-
     document.getElementById('openCommonItems').addEventListener('click', async () => {
         try {
             await window.electronAPI.invoke('open-common-items');

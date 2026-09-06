@@ -5,7 +5,7 @@ let commonItems = []; //这里是常驻
 function isOffBanners(record, commonItems) {
     const validPools = [
         "角色活动跃迁", "光锥活动跃迁", "角色联动跃迁", "光锥联动跃迁",
-        "角色活动唤取", "武器活动祈愿", "角色活动祈愿", "独家频段", "音擎频段"
+        "武器活动祈愿", "角色活动祈愿", "独家频段", "音擎频段"
     ];
 
     if (!validPools.includes(record.card_pool_type)) return false;
@@ -75,9 +75,9 @@ function calculateUpAverage(records) {
     const upRecords = records.filter(
         r => r.quality_level === 5
         && !isCommonItem(r.name, r.timestamp || r.time, commonItems)
-        && (r.card_pool_type === "角色活动跃迁" || r.card_pool_type === "光锥活动跃迁" || r.card_pool_type === "角色活动唤取"
+        && (r.card_pool_type === "角色活动跃迁" || r.card_pool_type === "光锥活动跃迁"
             || r.card_pool_type === "角色联动跃迁" || r.card_pool_type === "光锥联动跃迁"
-            || r.card_pool_type === "武器活动祈愿" || r.card_pool_type === "角色活动祈愿" || r.card_pool_type === "武器活动唤取")
+            || r.card_pool_type === "武器活动祈愿" || r.card_pool_type === "角色活动祈愿")
     );
     if (upRecords.length === 0) return "还没抽出UP";
     // 遍历UP角色，累加抽数

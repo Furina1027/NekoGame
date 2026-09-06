@@ -121,25 +121,6 @@ function initializeDatabase() {
     });
     db2.serialize(() => {
         db2.run(`
-            CREATE TABLE IF NOT EXISTS gacha_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                player_id TEXT NOT NULL,
-                card_pool_type TEXT NOT NULL,
-                resource_id TEXT,
-                quality_level INTEGER,
-                resource_type TEXT,
-                name TEXT,
-                count INTEGER,
-                timestamp TEXT NOT NULL
-            );
-        `, (err) => {
-            if (err) {
-                console.error("Failed to initialize gacha_logs table:", err.message);
-            } else {
-                console.log("gacha_logs table initialized successfully.");
-            }
-        });
-        db2.run(`
             CREATE TABLE IF NOT EXISTS starRail_gacha (
                 id TEXT PRIMARY KEY,
                 uid TEXT NOT NULL,
