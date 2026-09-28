@@ -259,38 +259,6 @@
         }
     });
 
-    const customPathInput = document.getElementById("custom-path");
-    const savePathButton = document.getElementById("save-path");
-    const resetPathButton = document.getElementById("reset-path");
-
-    // 初始化加载自定义路径
-    const loadCustomPath = async () => {
-        const customPath = await window.electronAPI.invoke("get-custom-path");
-        customPathInput.value = customPath || ""; // 如果没有配置，则显示为空
-    };
-
-    // 保存自定义路径
-    savePathButton.addEventListener("click", async () => {
-        const customPath = customPathInput.value.trim();
-
-        if (!customPath) {
-            animationMessage(false, "自定义路径不能为空！");
-            return;
-        }
-
-        await window.electronAPI.invoke("set-custom-path", customPath);
-        animationMessage(true, "自定义路径已保存！");
-    });
-
-    // 恢复默认路径
-    resetPathButton.addEventListener("click", async () => {
-        await window.electronAPI.invoke("reset-custom-path");
-        animationMessage(true, "已恢复默认源！");
-        loadCustomPath();
-    });
-
-    // 初始化
-    loadCustomPath();
     // 初始化加载路径
     loadDataPath();
 
