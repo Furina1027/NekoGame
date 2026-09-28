@@ -4,6 +4,7 @@ const path = require('path');
 const https = require('https');
 const url = require('url');
 const {db} = require("../../../app/database");
+const { resolveGachaLink } = require('../../mihoyo/gachaLink');
 
 // 改成从数据库中获取路径
 function queryGamePathFromDb() {
@@ -84,7 +85,18 @@ ipcMain.handle('getZZZLink', async () => {
     return await getZZZUrl();
 });
 
+/**
+ * 取绝区零调频链接
+ * 先走米游社 cookie 换 authkey，失败再从游戏缓存里抠（原来的逻辑）
+ */
 async function getZZZUrl(){
+    const cookieFirst = await resolveGachaLink('zzz', () => getZZZUrlFromCache(), { clipboard });
+    if (cookieFirst.success) return cookieFirst;
+    return cookieFirst;
+}
+
+// 原来的缓存抓取逻辑
+async function getZZZUrlFromCache(){
     try {
         const gameDir = await queryGamePathFromDb();
         if (!gameDir) {

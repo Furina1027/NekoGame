@@ -42,7 +42,7 @@ async function insertGachaLogs(logs) {
 
 async function fetchStarRailGachaData(event) {
     // 获取抽卡记录链接
-    const result = getStarRailLink();
+    const result = await getStarRailLink();
     if (!result.success) {
         console.error(result.message);
         return {success: result.success, message:result.message};

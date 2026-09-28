@@ -2,6 +2,7 @@ const { ipcMain, clipboard,shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const { resolveGachaLink } = require('../../mihoyo/gachaLink');
 
 // 动态获取日志路径
 function getLogPath() {
@@ -71,7 +72,20 @@ ipcMain.handle('getGenshinWishLink', async () => {
     return await getGenshinWishUrl();
 });
 
-async function getGenshinWishUrl() {
+/**
+ * 取原神 / 千星奇域抽卡链接
+ * 先走米游社 cookie 换 authkey，失败再从游戏缓存里抠（原来的逻辑）
+ * @param {{gameKey?: 'genshin'|'miliastra'}} opts
+ */
+async function getGenshinWishUrl(opts = {}) {
+    const gameKey = opts.gameKey || 'genshin';
+    const cookieFirst = await resolveGachaLink(gameKey, () => getGenshinWishUrlFromCache(), { clipboard });
+    if (cookieFirst.success) return cookieFirst;
+    return cookieFirst;
+}
+
+// 原来的缓存抓取逻辑
+async function getGenshinWishUrlFromCache() {
     const logPath = getLogPath();
     if (!logPath) {
         return { success: false, message: '未找到原神日志文件，请确认游戏是否启动过。' };

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const url = require('url');
+const { resolveGachaLink } = require('../../mihoyo/gachaLink');
 
 const GameLogPath = {
     CN: path.join('miHoYo', '崩坏：星穹铁道'),
@@ -95,7 +96,17 @@ ipcMain.handle('getStarRailUrl', async () => {
 });
 
 
-function getStarRailLink() {
+/**
+ * 取崩铁抽卡链接
+ * ⚠️ 崩铁的 genAuthKey authkey 调 getGachaLog 会返回 -100，所以这里实际只走缓存；
+ *    仍套一层 resolveGachaLink，万一米哈游哪天放行，把 constants 里 cookieSupported 改成 true 即可。
+ */
+async function getStarRailLink() {
+    return await resolveGachaLink('starrail', () => getStarRailLinkFromCache(), { clipboard });
+}
+
+// 原来的缓存抓取逻辑
+function getStarRailLinkFromCache() {
     const gamePath = getGameInstallPath();
     if (!gamePath) return { success: false, message: '未找到日志文件，请启动过游戏后再尝试。' };
     const cachePath = getLatestCachePath(gamePath);

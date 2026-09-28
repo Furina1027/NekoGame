@@ -150,6 +150,42 @@
             </div>
         </div>
     </div>
+    <!-- 米游社账号卡片 -->
+    <div class="setting-card">
+        <div class="card-header">
+            <h3>米游社账号</h3>
+        </div>
+        <div class="card-body">
+            <div class="settings-option">
+                <div id="mhyAccountInfo" class="help-text">未登录米游社账号</div>
+            </div>
+            <div class="settings-option">
+                <button id="mhyLoginBtn">登录米游社（扫码）</button>
+                <button id="mhyLogoutBtn">退出登录</button>
+                <button id="mhyRefreshBtn">刷新状态</button>
+            </div>
+            <div class="settings-option">
+                <button id="mhyTestBtn">自检抽卡链路</button>
+                <p class="help-text">
+                    登录后 <b>原神 / 千星奇域 / 绝区零</b> 可直接用米游社换取抽卡链接，无需启动游戏、无需打开祈愿页。<br>
+                    <b>崩坏：星穹铁道</b> 接口限制（authkey 换出来后调 getGachaLog 返回 -100），仍走游戏缓存。<br>
+                    未登录时会自动回退到原来的缓存抓取方式。
+                </p>
+            </div>
+            <div id="mhyRoles" class="settings-option"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 扫码登录浮层 -->
+<div id="mhyQrOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;">
+    <div style="background:#2a2a2a;border-radius:12px;padding:24px;text-align:center;color:#eee;min-width:320px;">
+        <div style="font-size:16px;margin-bottom:6px;">请使用米游社 App 扫码</div>
+        <div style="font-size:12px;color:#aaa;margin-bottom:14px;">仅用于登录米游社账号，与游戏账号无关</div>
+        <img id="mhyQrImage" alt="登录二维码" style="width:240px;height:240px;background:#fff;border-radius:8px;" />
+        <div id="mhyQrStatus" style="font-size:13px;color:#bbb;margin-top:12px;">正在生成二维码...</div>
+        <button id="mhyQrCancel" style="margin-top:14px;padding:6px 18px;border:none;border-radius:6px;cursor:pointer;">取消</button>
+    </div>
 </div>
 
 <link rel="stylesheet" href="./css/settings.css">

@@ -173,6 +173,7 @@ if (!gotTheLock) {
     app.exit(); // 使用 app.exit 退出当前实例
 }
 require('./utils/analysisGacha/analysisIpc'); // 引入分析相关的 IPC 逻辑
+require('./utils/mihoyo/ipc'); // 米游社登录 / authkey 换抽卡链接
 // 设置页面
 require('./utils/settings/checkError');
 require('./utils/settings/export/exportExcel');

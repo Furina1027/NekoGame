@@ -59,16 +59,20 @@ ipcMain.handle('get-miliastra-gacha-records', async () => {
             );
         });
         // 定义gacha_type对应的中文映射
+        // 注意：活动颂愿实际会返回 20011/20012/20021/20022 等细分类型，
+        // 新数据入库时已归一化成 2000（见 gachaAnalysisMiliastra.js），
+        // 但库里可能还留着归一化之前的老数据，这里兜底一次。
         const gachaTypeMap = {
             "1000": "常驻颂愿",
             "2000": "活动颂愿"
         };
+        const mapGachaType = (t) => gachaTypeMap[String(t)] || (String(t) === "1000" ? "常驻颂愿" : "活动颂愿");
         // 替换字段
         return rows.map(record => ({
             id: record.id,
             uid: record.uid,
             gacha_id: record.gacha_id,
-            card_pool_type: gachaTypeMap[record.gacha_type] || record.gacha_type,  // 替换gacha_type为card_pool_type
+            card_pool_type: mapGachaType(record.gacha_type),  // 替换gacha_type为card_pool_type
             item_id: record.item_id,
             count: record.count,
             timestamp: record.time,  // 替换time为timestamp

@@ -294,4 +294,141 @@
     // 初始化加载路径
     loadDataPath();
 
+    /* ---------------- 米游社账号 ---------------- */
+    const mhyInfo = document.getElementById('mhyAccountInfo');
+    const mhyRoles = document.getElementById('mhyRoles');
+    const mhyLoginBtn = document.getElementById('mhyLoginBtn');
+    const mhyLogoutBtn = document.getElementById('mhyLogoutBtn');
+    const mhyRefreshBtn = document.getElementById('mhyRefreshBtn');
+    const mhyTestBtn = document.getElementById('mhyTestBtn');
+    const qrOverlay = document.getElementById('mhyQrOverlay');
+    const qrImage = document.getElementById('mhyQrImage');
+    const qrStatus = document.getElementById('mhyQrStatus');
+    const qrCancel = document.getElementById('mhyQrCancel');
+
+    let qrTimer = null;
+
+    function renderAccount(info) {
+        if (!info || !info.loggedIn) {
+            mhyInfo.innerHTML = `未登录米游社账号${info && info.message ? `<br><span style="color:#c66">${info.message}</span>` : ''}`;
+            mhyRoles.innerHTML = '';
+            mhyLogoutBtn.style.display = 'none';
+            return;
+        }
+        mhyLogoutBtn.style.display = '';
+        mhyInfo.innerHTML = `已登录：<b>${info.nickname || info.accountId}</b>（米游社 UID ${info.accountId}）<br>登录时间 ${info.updated || '未知'}`;
+
+        let html = '';
+        for (const [key, g] of Object.entries(info.games || {})) {
+            const flag = g.cookieSupported
+                ? '<span style="color:#6c6">支持免启动游戏</span>'
+                : '<span style="color:#c96">接口限制，走游戏缓存</span>';
+            html += `<div style="margin:10px 0;">
+                <div><b>${g.label}</b> ${flag}</div>`;
+            if (!g.candidates.length) {
+                html += `<div class="help-text" style="margin:2px 0;">账号下没有该游戏角色</div>`;
+            } else {
+                g.candidates.forEach((c) => {
+                    // ipc.js 里 candidates 的字段是 uid / region / regionName / level，不是 gameUid
+                    html += `<div class="help-text" style="margin:2px 0;">
+                        UID ${c.uid} · ${c.regionName}（${c.region}）· Lv.${c.level}
+                        <button data-game="${key}" data-uid="${c.uid}" class="mhy-pick" style="margin-left:8px;padding:2px 10px;border:none;border-radius:4px;cursor:pointer;">选用</button>
+                    </div>`;
+                });
+            }
+            html += `</div>`;
+        }
+        mhyRoles.innerHTML = html;
+        mhyRoles.querySelectorAll('.mhy-pick').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                await window.electronAPI.invoke('mhy-set-preferred-uid', btn.dataset.game, btn.dataset.uid);
+                animationMessage(true, `${btn.dataset.game} 已选用 UID ${btn.dataset.uid}`);
+                await refreshAccount();
+            });
+        });
+    }
+
+    async function refreshAccount() {
+        try {
+            const info = await window.electronAPI.invoke('mhy-account-info');
+            renderAccount(info);
+        } catch (e) {
+            renderAccount(null);
+        }
+    }
+
+    function stopQr() {
+        if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+        qrOverlay.style.display = 'none';
+    }
+
+    async function startQr() {
+        qrOverlay.style.display = 'flex';
+        qrStatus.textContent = '正在生成二维码...';
+        const created = await window.electronAPI.invoke('mhy-login-create-qr');
+        if (!created.success) {
+            qrStatus.textContent = `创建二维码失败：${created.message}`;
+            return;
+        }
+        qrImage.src = created.qrDataUrl;
+        qrStatus.textContent = '等待扫码...';
+
+        let expiredOnce = false;
+        const poll = async () => {
+            try {
+                const r = await window.electronAPI.invoke('mhy-login-poll', created.ticket);
+                if (!r.success) {
+                    if (r.expired && !expiredOnce) {
+                        expiredOnce = true;
+                        qrStatus.textContent = '二维码已过期，重新生成...';
+                        stopQr();
+                        await startQr();
+                        return;
+                    }
+                    qrStatus.textContent = `查询失败：${r.message}`;
+                    return;
+                }
+                if (r.status === 'Scanned') qrStatus.textContent = '已扫码，请在手机上确认...';
+                if (r.status === 'Confirmed') {
+                    stopQr();
+                    animationMessage(true, `登录成功：${r.nickname || r.accountId}`);
+                    await refreshAccount();
+                }
+            } catch (e) {
+                qrStatus.textContent = `轮询异常：${e}`;
+            }
+        };
+        if (qrTimer) clearInterval(qrTimer);
+        qrTimer = setInterval(poll, 1500);
+        poll();
+    }
+
+    if (mhyLoginBtn) mhyLoginBtn.addEventListener('click', startQr);
+    if (qrCancel) qrCancel.addEventListener('click', stopQr);
+    if (mhyRefreshBtn) mhyRefreshBtn.addEventListener('click', refreshAccount);
+
+    if (mhyLogoutBtn) {
+        mhyLogoutBtn.addEventListener('click', async () => {
+            await window.electronAPI.invoke('mhy-logout');
+            animationMessage(true, '已退出米游社账号');
+            await refreshAccount();
+        });
+    }
+
+    if (mhyTestBtn) {
+        mhyTestBtn.addEventListener('click', async () => {
+            mhyTestBtn.disabled = true;
+            const keys = ['genshin', 'miliastra', 'zzz', 'starrail'];
+            const lines = [];
+            for (const k of keys) {
+                const r = await window.electronAPI.invoke('mhy-test-gacha', k);
+                lines.push(`${r.game}: ${r.success ? '成功' : '失败'} [${r.step}] ${r.message || ''}${r.count !== undefined ? ` 条数=${r.count}` : ''}`);
+            }
+            animationMessage(true, lines.join('\n'));
+            mhyTestBtn.disabled = false;
+        });
+    }
+
+    refreshAccount();
+
 })();
