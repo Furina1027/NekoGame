@@ -3,6 +3,14 @@ const WebSocket = require('ws');
 // 监听端口 22334
 const wss = new WebSocket.Server({ port: 22334 });
 
+// 端口是写死的，很容易被占用：多开一个实例、或别的程序占了这个端口都会
+// 触发 EADDRINUSE。之前没有 error 监听，它会变成未捕获异常直接把主进程带崩，
+// 表现为启动时弹 "A JavaScript error occurred in the main process"。
+// 通知只是附加功能，取不到就降级，不能因此让整个应用起不来。
+wss.on('error', (err) => {
+    console.error(`通知服务启动失败（端口 22334），本次运行不会显示通知：${err.message}`);
+});
+
 // 存储 WebSocket 连接的客户端
 let connectedClient = null;
 wss.on('connection', (ws) => {

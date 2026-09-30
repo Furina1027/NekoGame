@@ -2,9 +2,23 @@
   "name": "nekogame",
   "version": "2.3.17",
   "main": "electron/main.js",
-  "description": "summerneko",
-  "author": "",
-  "license": "ISC",
+  "description": "抽卡分析与游戏时长管理工具，基于 Neko Game 二次开发",
+  "author": "Furina1027",
+  "contributors": [
+    {
+      "name": "Summer-Neko",
+      "url": "https://github.com/Summer-Neko/NekoGame"
+    }
+  ],
+  "license": "GPL-3.0",
+  "homepage": "https://github.com/Furina1027/NekoGame",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Furina1027/NekoGame.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Furina1027/NekoGame/issues"
+  },
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c cyan,magenta \"npm:dev:vite\" \"npm:dev:electron\"",
     "dev:vite": "vite",
@@ -17,7 +31,14 @@
     "start": "npm run build:vite && electron .",
     "postinstall": "electron-builder install-app-deps"
   },
-  "keywords": [],
+  "keywords": [
+    "electron",
+    "gacha",
+    "genshin-impact",
+    "honkai-star-rail",
+    "zenless-zone-zero",
+    "playtime-tracker"
+  ],
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^22.10.2",
@@ -75,7 +96,7 @@
   "build": {
     "appId": "com.wenpeng.nekogame",
     "productName": "NekoGame",
-    "copyright": "Copyright © 2023",
+    "copyright": "Copyright © 2023 Summer-Neko (原项目) | 二次开发 © 2026 Furina1027 | GPL-3.0",
     "releaseInfo": {
       "releaseNotesFile": "release-notes.md"
     },
@@ -104,13 +125,6 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "Summer-Neko",
-        "repo": "NekoGame"
-      }
-    ]
+    }
   }
 }
