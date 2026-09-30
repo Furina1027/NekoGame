@@ -9,7 +9,6 @@
 > **推荐阅读**：建议先浏览本文（预计用时：5分钟），帮助您快速了解并开始使用 Neko Game。
 
 <img width="974" alt="preview" src="https://github.com/user-attachments/assets/a19f8966-1dc5-45f3-9fae-34699019d4f2">
-
 ## 功能特点
 - **游戏记录**：自动跟踪并记录游戏时长，提供详细的统计数据。
 - **抽卡分析**：支持一键崩铁原神绝区零抽卡分析。所有的链接均会自动复制
@@ -36,14 +35,48 @@
    ```bash
    cd nekogame
    ```
-3. 安装依赖：
+3. 安装依赖（会自动为 Electron 重新编译原生模块）：
    ```bash
    npm install
    ```
-4. 在开发模式下运行应用程序：
+4. 开发模式（Vite HMR + Electron）：
    ```bash
-   npm start
+   npm run dev
    ```
+5. 类型检查：
+   ```bash
+   npm run typecheck
+   ```
+6. 打包安装包：
+   ```bash
+   npm run dist
+   ```
+
+### 技术栈与目录结构
+
+渲染进程已重构为 **React 19 + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui**，主进程保持原有的 CommonJS 架构。
+
+```
+electron/            主进程（CommonJS）
+  main.js            入口，注册 app:// 与 media:// 自定义协议
+  preload.js         contextBridge 暴露的 IPC API
+  app/               数据库、游戏追踪、更新、IPC 分发
+  utils/             米游社登录、抽卡链接、数据上传、背景设置
+  windows/guide.html 更新日志弹窗（静态）
+src/                 渲染进程（React + TS）
+  components/ui/     shadcn/ui 组件
+  components/chart/  Chart.js 封装
+  hooks/             主题、背景、Toast
+  lib/               gacha.ts（抽卡统计算法）、format.ts、utils.ts
+  pages/             主页 / 游戏库 / 游戏工具 / 设置 / 抽卡模块
+  windows/dataSync/  数据同步窗口（独立 Vite 入口）
+legacy/              重构前的原始页面与脚本，仅作参考，不参与构建
+scripts/screenshot.js 开发期 UI 截图工具
+```
+
+**设计系统**：所有颜色、圆角、阴影、模糊都定义在 `src/styles/globals.css` 的 CSS 变量中（浅色/深色双主题），组件不写死 `rgba()`。背景遮罩强度由设置页的滑块统一控制，并设有 45% 的可读性下限，任意壁纸下前景文字都保持清晰。
+
+**页面以 `app://` 协议加载**而非 `file://`——后者会因 CORS 拦截 ES module，导致 React 无法执行。用户自选的图片通过受限的 `media://` 协议代理（仅放行图片扩展名），因为 Chromium 禁止非 `file://` 源直接引用 `file://` 子资源。
 
 ## 使用指南
 - **祈愿分析**：确认半小时内打开过游戏界面的祈愿页面。然后点击`刷新数据`即可。

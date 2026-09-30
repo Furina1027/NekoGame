@@ -1,0 +1,431 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* ==========================================================================
+   Design tokens
+   Every colour, radius, shadow and blur in the app resolves through these.
+   Surface alpha is driven by --surface-dim so the background-image opacity
+   slider in Settings scales the whole UI at once instead of a handful of
+   hard-coded rgba() values.
+   ========================================================================== */
+
+:root {
+  --radius: 0.75rem;
+
+  /* Light theme */
+  --background: oklch(0.985 0.002 265);
+  --foreground: oklch(0.21 0.015 275);
+  --surface: oklch(1 0 0 / 0.72);
+  --surface-raised: oklch(1 0 0 / 0.88);
+  --surface-sunken: oklch(0.96 0.003 265 / 0.6);
+  --surface-dim: 0.25;
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0 / 0.94);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.62 0.11 200);
+  --primary-foreground: oklch(0.99 0.005 200);
+  --secondary: oklch(0.94 0.006 265 / 0.8);
+  --secondary-foreground: oklch(0.3 0.02 275);
+  --muted: oklch(0.94 0.006 265 / 0.7);
+  --muted-foreground: oklch(0.52 0.017 275);
+  --accent: oklch(0.68 0.13 340);
+  --accent-foreground: oklch(0.99 0.005 340);
+  --destructive: oklch(0.58 0.21 25);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --success: oklch(0.66 0.15 155);
+  --warning: oklch(0.78 0.15 80);
+
+  --border: oklch(0.21 0.015 275 / 0.1);
+  --input: oklch(0.21 0.015 275 / 0.12);
+  --ring: oklch(0.62 0.11 200 / 0.65);
+
+  --chart-1: oklch(0.62 0.11 200);
+  --chart-2: oklch(0.68 0.13 340);
+  --chart-3: oklch(0.7 0.14 265);
+  --chart-4: oklch(0.76 0.15 85);
+  --chart-5: oklch(0.68 0.15 155);
+
+  /* Game brand accents used by the gacha module */
+  --game-genshin: oklch(0.72 0.13 235);
+  --game-hsr: oklch(0.7 0.14 285);
+  --game-zzz: oklch(0.78 0.15 60);
+  --game-miliastra: oklch(0.74 0.14 165);
+
+  /* Pull rarity ramp, shared by every gacha page */
+  --rarity-5: oklch(0.78 0.15 85);
+  --rarity-4: oklch(0.7 0.16 300);
+  --rarity-3: oklch(0.68 0.15 245);
+
+  /* 抽卡记录配色（浅色主题） */
+  --gacha-5: #d19a66;
+  --gacha-4: #c678dd;
+  --gacha-3: #61afef;
+  --gacha-offbanner: #e06c75;
+  --gacha-row-bg: oklch(1 0 0 / 0.65);
+  --gacha-badge-bg: oklch(0.95 0.006 265);
+}
+
+.dark {
+  --background: oklch(0.17 0.014 275);
+  --foreground: oklch(0.97 0.004 275);
+  /* 玻璃层需要压得住任意壁纸，透明度给足，实际观感靠遮罩调 */
+  --surface: oklch(0.22 0.016 275 / 0.72);
+  --surface-raised: oklch(0.29 0.017 275 / 0.86);
+  --surface-sunken: oklch(0.19 0.015 275 / 0.6);
+  --surface-dim: 0.45;
+  --card: var(--surface);
+  --popover: oklch(0.22 0.017 275 / 0.96);
+
+  --primary: oklch(0.8 0.115 195);
+  --primary-foreground: oklch(0.2 0.03 205);
+  --secondary: oklch(0.32 0.016 275 / 0.7);
+  --secondary-foreground: oklch(0.93 0.006 275);
+  --muted: oklch(0.3 0.014 275 / 0.6);
+  --muted-foreground: oklch(0.74 0.015 275);
+  --accent: oklch(0.78 0.12 340);
+  --accent-foreground: oklch(0.22 0.04 345);
+  --destructive: oklch(0.65 0.19 22);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --success: oklch(0.75 0.16 155);
+  --warning: oklch(0.82 0.15 82);
+
+  --border: oklch(1 0 0 / 0.09);
+  --input: oklch(1 0 0 / 0.11);
+  --ring: oklch(0.8 0.115 195 / 0.7);
+
+  --chart-1: oklch(0.8 0.115 195);
+  --chart-2: oklch(0.78 0.12 340);
+  --chart-3: oklch(0.72 0.14 265);
+  --chart-4: oklch(0.82 0.15 85);
+  --chart-5: oklch(0.75 0.16 155);
+
+  --game-genshin: oklch(0.75 0.13 235);
+  --game-hsr: oklch(0.73 0.14 285);
+  --game-zzz: oklch(0.82 0.15 60);
+  --game-miliastra: oklch(0.78 0.14 165);
+
+  --rarity-5: oklch(0.82 0.15 85);
+  --rarity-4: oklch(0.73 0.16 300);
+  --rarity-3: oklch(0.7 0.15 245);
+
+  /* 抽卡记录配色，沿用 TeyvatGuide 的 one-dark 调色板 */
+  --gacha-5: #d19a66;
+  --gacha-4: #c678dd;
+  --gacha-3: #61afef;
+  --gacha-offbanner: #e06c75;
+  --gacha-row-bg: oklch(0.26 0.017 275 / 0.72);
+  --gacha-badge-bg: oklch(0.2 0.015 275 / 0.9);
+
+  /* 壁纸遮罩：始终压暗，不随主题变化 */
+  --scrim: radial-gradient(
+    120% 90% at 50% 0%,
+    rgb(12 12 18 / 0.35) 0%,
+    rgb(12 12 18 / 0.86) 100%
+  );
+  --bg-blur: 24px;
+  --panel-bg: var(--surface);
+  --sidebar-bg: var(--surface);
+  --scrim-min: 0.45;
+  /* 遮罩滑块（--dim）对壁纸的实际压暗增益，各预设单独调，
+     否则同一个滑块值在通透预设下依然会把壁纸压得很死。 */
+  --dim-gain: 0.55;
+}
+
+:root[data-bg-style='light'] {
+  /* 轻透：壁纸看得清，面板更实来保证可读性 */
+  --bg-blur: 16px;
+  --scrim:
+    radial-gradient(130% 100% at 50% 0%, rgb(12 12 18 / 0.28) 0%, rgb(12 12 18 / 0.72) 100%);
+  --scrim-min: 0.3;
+  --sidebar-bg: oklch(0.2 0.016 275 / 0.86);
+  --panel-bg: oklch(0.2 0.016 275 / 0.8);
+}
+
+:root[data-bg-style='floating'] {
+  /* 悬浮卡片：侧栏与内容区完全透明，只有卡片和浮层带背景，壁纸几乎完整露出 */
+  --bg-blur: 4px;
+  --scrim:
+    radial-gradient(150% 120% at 50% 0%, rgb(12 12 18 / 0.16) 0%, rgb(12 12 18 / 0.38) 100%);
+  --scrim-min: 0.1;
+  --dim-gain: 0.16;
+  --panel-bg: oklch(0.2 0.016 275 / 0.2);
+  --sidebar-bg: oklch(0.2 0.016 275 / 0.7);
+}
+
+/* 这个预设就是用来"看壁纸"的，所以把卡片一并压到很透。
+   文字对比度在这里是刻意牺牲的：另外三个预设随时可以切回来。 */
+html.dark[data-bg-style='floating'] {
+  --surface: oklch(0.22 0.016 275 / 0.34);
+  --surface-raised: oklch(0.29 0.017 275 / 0.5);
+  --surface-sunken: oklch(0.19 0.015 275 / 0.28);
+  --secondary: oklch(0.32 0.016 275 / 0.42);
+  --muted: oklch(0.3 0.014 275 / 0.34);
+  --gacha-row-bg: oklch(0.26 0.017 275 / 0.4);
+  --gacha-badge-bg: oklch(0.2 0.015 275 / 0.72);
+}
+
+:root[data-bg-style='solid-sidebar'] {
+  /* 实心侧栏：左边完全不透明，右侧内容区透出壁纸，层次最分明 */
+  --bg-blur: 18px;
+  --scrim:
+    radial-gradient(120% 90% at 50% 0%, rgb(12 12 18 / 0.2) 0%, rgb(12 12 18 / 0.66) 100%),
+    linear-gradient(90deg, rgb(12 12 18 / 0.1) 0%, rgb(12 12 18 / 0.5) 100%);
+  --scrim-min: 0.24;
+  --sidebar-bg: oklch(0.19 0.015 275 / 0.96);
+  --panel-bg: oklch(0.2 0.016 275 / 0.28);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-game-genshin: var(--game-genshin);
+  --color-game-hsr: var(--game-hsr);
+  --color-game-zzz: var(--game-zzz);
+  --color-game-miliastra: var(--game-miliastra);
+
+  --color-rarity-5: var(--rarity-5);
+  --color-rarity-4: var(--rarity-4);
+  --color-rarity-3: var(--rarity-3);
+
+  --color-gacha-5: var(--gacha-5);
+  --color-gacha-4: var(--gacha-4);
+  --color-gacha-3: var(--gacha-3);
+  --color-gacha-offbanner: var(--gacha-offbanner);
+  --color-gacha-row: var(--gacha-row-bg);
+  --color-gacha-badge: var(--gacha-badge-bg);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  --font-sans:
+    'Inter var', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text',
+    'Segoe UI', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Consolas, 'Liberation Mono',
+    monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* Chrome is draggable except where explicitly opted out. */
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Text stays selectable; only chrome is not. */
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 35%, transparent);
+  }
+
+  input,
+  textarea,
+  button,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  [type='range'] {
+    accent-color: var(--primary);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+/* ==========================================================================
+   Composite utilities
+   ========================================================================== */
+
+@layer utilities {
+  /* Frosted panel used by every card, sidebar and modal. */
+  .glass {
+    background-color: var(--surface);
+    backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid var(--border);
+  }
+
+  /* A 1px inner highlight along the top edge, the detail that sells the glass.
+     :where() 让这条规则不产生特异性，否则它会盖掉 Tailwind 的 .fixed/.absolute：
+     DialogContent 同时用了 glass-sheen 和 fixed，结果弹窗被算成 relative，
+     top-1/2 变成相对自身偏移，整块弹窗被顶到窗口外面看不见。 */
+  :where(.glass-sheen) {
+    position: relative;
+  }
+  .glass-sheen::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, white 22%, transparent),
+      transparent
+    );
+    pointer-events: none;
+  }
+
+  /* 浮层（下拉、选择器、菜单）比普通卡片更不透明，
+     因为它们盖在任意内容之上，可读性优先于通透感。 */
+  .glass-pop {
+    background-color: var(--popover);
+    backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid var(--border);
+  }
+
+  /* 提示气泡体积小、贴得近，用半透明即可，避免显得笨重 */
+  .glass-hint {
+    background-color: color-mix(in oklch, var(--popover) 82%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--border);
+  }
+
+  /* 遮罩的亮度兜底全部作用在壁纸层上。
+     这里刻意不用 backdrop-filter：CSS 压缩后该属性只剩 -webkit- 前缀版本，
+     Chromium 130 不认它，滑块会完全失效（实测 meanLuma 不随 --dim 变化）。 */
+  .app-scrim {
+    background: var(--scrim);
+  }
+
+  /* 壁纸层：模糊半径随预设变化，亮度由 --dim × --dim-gain 决定，
+     --scrim-min 兜住下限，保证文字始终可读。 */
+  .app-wallpaper {
+    filter: blur(var(--bg-blur)) saturate(0.92)
+      brightness(max(var(--scrim-min), calc(1 - var(--dim, 0.45) * var(--dim-gain, 0.55))));
+  }
+
+  /* 侧栏与内容面板：背景色由 --sidebar-bg / --panel-bg 决定，
+     透明预设下只剩一层轻微模糊，壁纸可以完整露出。 */
+  .panel-frost {
+    backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid var(--border);
+  }
+
+  /* 承载滚动内容的主面板刻意不给 backdrop-filter。
+     它是全窗口尺寸，滚动每一帧都要把背后重新模糊一次：
+     实测主页平均帧间隔 35.5ms -> 24.1ms，超过 32ms 的长帧 90 -> 17。
+     壁纸层本来就已经模糊过，少这一层几乎看不出差别。 */
+  .panel-scroll {
+    border: 1px solid var(--border);
+  }
+
+  /* 通透预设下标题栏是透明地压在壁纸上的，标题和窗口按钮会糊掉。
+     只给这 40px 高的条带补一层顶部渐变，比整体压暗壁纸便宜得多。 */
+  :root[data-bg-style='floating'] .app-drag {
+    background: linear-gradient(180deg, rgb(12 12 18 / 0.6) 0%, rgb(12 12 18 / 0) 100%);
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Respect the OS "reduce motion" setting across the whole app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
