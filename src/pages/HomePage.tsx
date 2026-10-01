@@ -26,6 +26,7 @@ import { ContributionHeatmap } from '@/components/library/ContributionHeatmap';
 import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/utils';
 import { formatDuration, formatHours, fromNow } from '@/lib/format';
+import { useToast } from '@/hooks/useToast';
 import type { DailyTimePoint, Game, LogEntry, NamedTimePoint, TrendPoint } from '@/types/domain';
 
 const ALL_TYPES = [
@@ -39,6 +40,19 @@ const ALL_TYPES = [
 
 const LOG_PAGE_SIZE = 20;
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+/**
+ * 各游戏的时长数据放在模块级缓存里，不随组件卸载丢。
+ * 切换游戏会卸载/挂载面板，若数据只存在 useState 里，来回切每次都要等 IPC 回来，
+ * 图表会先空一帧再画出来——看起来就是「图表不见了」。
+ * 命中缓存时首帧就带数据，之后再静默刷新。
+ */
+const dailyCache = new Map<number, DailyTimePoint[]>();
+const trendCache = new Map<number, TrendPoint[]>();
+let allGamesCache: {
+  today: number; yesterday: number; updatedAt: string;
+  weekly: NamedTimePoint[]; monthly: TrendPoint[]; halfYear: NamedTimePoint[]; distribution: NamedTimePoint[];
+} | null = null;
 
 /** null 表示查看全部游戏 */
 type GameFilter = number | null;
@@ -67,6 +81,35 @@ export default function HomePage() {
     () => (filter === null ? null : (games.find((g) => g.id === filter) ?? null)),
     [filter, games],
   );
+
+  // 预热各游戏的时长数据。
+  // 不预热的话，缓存里只有「全部游戏」和已经点过的游戏：首次点某个游戏时
+  // 图表只能空建，等 IPC 回来才 update() 出动画，中间有一段空窗——
+  // 表现出来就是「全部游戏 -> 具体游戏」比反向切换卡一下。
+  useEffect(() => {
+    const pending = games.map((g) => g.id).filter((id) => !dailyCache.has(id));
+    if (pending.length === 0) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      for (const id of pending) {
+        if (cancelled) return;
+        const [d, t] = await Promise.all([
+          window.electronAPI.getGameDailyTimeData(id).catch(() => []),
+          window.electronAPI.getGameTrendData(id).catch(() => []),
+        ]);
+        if (!dailyCache.has(id)) {
+          dailyCache.set(id, Array.isArray(d) ? d : []);
+          trendCache.set(id, Array.isArray(t) ? t : []);
+        }
+        // 逐个来，别和用户正在做的操作抢数据库
+        await new Promise((r) => window.setTimeout(r, 150));
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [games]);
 
   return (
     <div className="flex h-full flex-col gap-5 p-5">
@@ -242,16 +285,18 @@ function OverviewTab({ filter }: { filter: Game | null }) {
 
 function AllGamesPanel() {
   const { colors } = useTheme();
+  const toast = useToast();
   const [refreshing, setRefreshing] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState<string>('');
-  const [todaySeconds, setTodaySeconds] = useState(0);
-  const [yesterdaySeconds, setYesterdaySeconds] = useState(0);
+  const [updatedAt, setUpdatedAt] = useState<string>(allGamesCache?.updatedAt ?? '');
+  const [todaySeconds, setTodaySeconds] = useState(allGamesCache?.today ?? 0);
+  const [yesterdaySeconds, setYesterdaySeconds] = useState(allGamesCache?.yesterday ?? 0);
 
-  const [weekly, setWeekly] = useState<NamedTimePoint[]>([]);
-  const [monthly, setMonthly] = useState<TrendPoint[]>([]);
-  const [halfYear, setHalfYear] = useState<NamedTimePoint[]>([]);
-  const [distribution, setDistribution] = useState<NamedTimePoint[]>([]);
+  const [weekly, setWeekly] = useState<NamedTimePoint[]>(allGamesCache?.weekly ?? []);
+  const [monthly, setMonthly] = useState<TrendPoint[]>(allGamesCache?.monthly ?? []);
+  const [halfYear, setHalfYear] = useState<NamedTimePoint[]>(allGamesCache?.halfYear ?? []);
+  const [distribution, setDistribution] = useState<NamedTimePoint[]>(allGamesCache?.distribution ?? []);
 
+  const [swapSeq, setSwapSeq] = useState(0);
   const [weeklyRange, setWeeklyRange] = useState<Range>('week');
   const [monthlyRange, setMonthlyRange] = useState<Range>('month');
   const [halfYearGranularity, setHalfYearGranularity] = useState<'daily' | 'monthly'>('daily');
@@ -273,6 +318,15 @@ function AllGamesPanel() {
       setMonthly(Array.isArray(m.data) ? m.data : []);
       setHalfYear(Array.isArray(h.data) ? h.data : []);
       setDistribution(Array.isArray(d.data) ? d.data : []);
+      allGamesCache = {
+        today: today.data.total_time_today ?? 0,
+        yesterday: yesterday.data.total_time_yesterday ?? 0,
+        updatedAt: today.updatedAt,
+        weekly: Array.isArray(w.data) ? w.data : [],
+        monthly: Array.isArray(m.data) ? m.data : [],
+        halfYear: Array.isArray(h.data) ? h.data : [],
+        distribution: Array.isArray(d.data) ? d.data : [],
+      };
     } catch {
       /* 主进程不可用时保持空态 */
     }
@@ -287,10 +341,16 @@ function AllGamesPanel() {
     try {
       await Promise.all(ALL_TYPES.map((t) => window.electronAPI.refreshAnalysisData(t)));
       await load();
+      // 汇总数据重算后往往与原值一致（时长只在游戏会话结束时变化），
+      // 光看界面几乎没有变化，不给反馈会被当成按钮坏了。
+      setSwapSeq((n) => n + 1);
+      toast.success('数据已刷新');
+    } catch (err) {
+      toast.error('刷新失败', err instanceof Error ? err.message : String(err));
     } finally {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [load, toast]);
 
   const weeklyChart = useMemo(() => {
     const byGame = new Map<string, number>();
@@ -396,6 +456,7 @@ function AllGamesPanel() {
           }
         >
           <Chart
+            swapKey={swapSeq}
             type="line"
             height={240}
             data={{
@@ -451,6 +512,7 @@ function AllGamesPanel() {
           }
         >
           <Chart
+            swapKey={swapSeq}
             type="bar"
             height={240}
             data={{
@@ -496,6 +558,7 @@ function AllGamesPanel() {
           }
         >
           <Chart
+            swapKey={swapSeq}
             type="line"
             height={240}
             data={{
@@ -533,8 +596,10 @@ function AllGamesPanel() {
           />
         </ChartCard>
 
-        <ChartCard title="游戏总时长占比" description="全部游戏的历史累计占比">
+        <ChartCard
+ title="游戏总时长占比" description="全部游戏的历史累计占比">
           <Chart
+            swapKey={swapSeq}
             type="doughnut"
             height={240}
             data={{
@@ -578,21 +643,29 @@ function AllGamesPanel() {
 
 function SingleGamePanel({ game }: { game: Game }) {
   const { colors } = useTheme();
-  const [daily, setDaily] = useState<DailyTimePoint[]>([]);
-  const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const toast = useToast();
+  const [daily, setDaily] = useState<DailyTimePoint[]>(() => dailyCache.get(game.id) ?? []);
+  const [trend, setTrend] = useState<TrendPoint[]>(() => trendCache.get(game.id) ?? []);
   const [loading, setLoading] = useState(true);
   const [granularity, setGranularity] = useState<'daily' | 'monthly'>('daily');
   const [refreshing, setRefreshing] = useState(false);
+  const [swapSeq, setSwapSeq] = useState(0);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // 有缓存时说明这次是回访，界面已经有内容了，不要再退回加载态把卡片藏起来
+    const cached = dailyCache.has(game.id) && trendCache.has(game.id);
+    if (!cached) setLoading(true);
     try {
       const [d, t] = await Promise.all([
         window.electronAPI.getGameDailyTimeData(game.id).catch(() => []),
         window.electronAPI.getGameTrendData(game.id).catch(() => []),
       ]);
-      setDaily(Array.isArray(d) ? d : []);
-      setTrend(Array.isArray(t) ? t : []);
+      const nextDaily = Array.isArray(d) ? d : [];
+      const nextTrend = Array.isArray(t) ? t : [];
+      dailyCache.set(game.id, nextDaily);
+      trendCache.set(game.id, nextTrend);
+      setDaily(nextDaily);
+      setTrend(nextTrend);
     } finally {
       setLoading(false);
     }
@@ -679,6 +752,10 @@ function SingleGamePanel({ game }: { game: Game }) {
               try {
                 await Promise.all(ALL_TYPES.map((t) => window.electronAPI.refreshAnalysisData(t)));
                 await load();
+                setSwapSeq((n) => n + 1);
+                toast.success('数据已刷新');
+              } catch (err) {
+                toast.error('刷新失败', err instanceof Error ? err.message : String(err));
               } finally {
                 setRefreshing(false);
               }
@@ -691,7 +768,9 @@ function SingleGamePanel({ game }: { game: Game }) {
         </div>
       </div>
 
-      {loading ? null : daily.length === 0 ? (
+      {/* 只有「首次加载且还没有数据」才让位；刷新时保留旧卡片，
+          否则 loading 一变 true 整棵树会被卸载，卡片消失一下再重新挂载。 */}
+      {loading && daily.length === 0 ? null : daily.length === 0 ? (
         <EmptyState title="该游戏还没有时长记录" description="启动一次游戏后记录就会出现在这里。" />
       ) : (
         <>
@@ -715,6 +794,7 @@ function SingleGamePanel({ game }: { game: Game }) {
               }
             >
               <Chart
+                swapKey={swapSeq}
                 type="line"
                 height={220}
                 data={{
@@ -755,8 +835,10 @@ function SingleGamePanel({ game }: { game: Game }) {
               />
             </ChartCard>
 
-            <ChartCard title="每周时长" description="最近 12 周的游玩分布">
+            <ChartCard
+ title="每周时长" description="最近 12 周的游玩分布">
               <Chart
+                swapKey={swapSeq}
                 type="bar"
                 height={220}
                 data={{
@@ -785,8 +867,10 @@ function SingleGamePanel({ game }: { game: Game }) {
 
           <ContributionHeatmap data={daily} weeks={26} />
 
-          <ChartCard title="星期分布" description="更爱在工作日还是周末玩游戏">
+          <ChartCard
+ title="星期分布" description="更爱在工作日还是周末玩游戏">
             <Chart
+              swapKey={swapSeq}
               type="doughnut"
               height={220}
               data={{

@@ -1,6 +1,6 @@
 {
   "name": "nekogame",
-  "version": "2.3.17",
+  "version": "2.3.18",
   "main": "electron/main.js",
   "description": "抽卡分析与游戏时长管理工具，基于 Neko Game 二次开发",
   "author": "Furina1027",
@@ -101,7 +101,7 @@
       "releaseNotesFile": "release-notes.md"
     },
     "extraMetadata": {
-      "version": "2.3.17"
+      "version": "2.3.18"
     },
     "files": [
       "assets/**/*",
