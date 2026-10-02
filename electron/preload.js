@@ -17,13 +17,19 @@ ipcRenderer.on('set-app-path', (_, path) => {
  * - 其余是用户在本机选的文件，走 media:// 协议由主进程代理
  *   （Chromium 禁止非 file:// 源直接引用 file:// 子资源）
  */
-function filePathToURL(filePath) {
+/**
+ * @param {string} filePath
+ * @param {number} [maxWidth] 显示宽度（CSS px）。给图标这类小图传一下，
+ *   主进程会返回缩略图，避免浏览器去解码 3000x7200 的原图。
+ */
+function filePathToURL(filePath, maxWidth) {
   if (!filePath) return '';
   if (filePath.startsWith('./assets')) {
     const rest = filePath.slice('./assets/'.length).replace(/\\/g, '/');
     return `app://neko/assets/${rest}`;
   }
-  return `media://local/?p=${encodeURIComponent(filePath)}`;
+  const size = maxWidth ? `&w=${Math.round(maxWidth * 2)}` : '';
+  return `media://local/?p=${encodeURIComponent(filePath)}${size}`;
 }
 
 /**

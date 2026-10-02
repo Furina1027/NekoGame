@@ -36,7 +36,7 @@ export interface ElectronAPI {
   /* 文件选择 */
   openFile(): Promise<string | null>;
   selectImageFile(): Promise<string | null>;
-  filePathToURL(filePath: string | null | undefined): string;
+  filePathToURL(filePath: string | null | undefined, maxWidth?: number): string;
 
   /* 首页统计 */
   getAnalysisData<T extends AnalysisType>(

@@ -226,14 +226,14 @@ function GameCard({
     >
       {game.poster_horizontal && (
         <img
-          src={window.electronAPI.filePathToURL(game.poster_horizontal)}
+          src={window.electronAPI.filePathToURL(game.poster_horizontal, 320)}
           alt=""
           className="absolute inset-0 size-full object-cover opacity-15"
           aria-hidden
         />
       )}
       <img
-        src={window.electronAPI.filePathToURL(game.icon) || './assets/app-icon.png'}
+        src={window.electronAPI.filePathToURL(game.icon, 44) || './assets/app-icon.png'}
         alt=""
         className="relative size-11 shrink-0 rounded-lg object-cover shadow-md"
       />
@@ -286,7 +286,7 @@ function GameDetail({
         <CardHeader className="flex-row items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <img
-              src={window.electronAPI.filePathToURL(details.icon) || './assets/app-icon.png'}
+              src={window.electronAPI.filePathToURL(details.icon, 36) || './assets/app-icon.png'}
               alt=""
               className="size-14 shrink-0 rounded-xl object-cover shadow-lg"
             />

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, protocol, net, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -52,11 +52,35 @@ function registerAppProtocol() {
 }
 
 function registerMediaProtocol() {
+    // 缩略图缓存：图标在界面上只有 36~64px，却常常是 3000x7200 这种原图，
+    // 每次整页重挂载都要重新解码三十几兆像素，是切页卡顿的主因。
+    const thumbCache = new Map();
+    const THUMB_CACHE_MAX = 120;
+    const THUMB_FORMAT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp']);
+
+    async function buildThumb(filePath, maxWidth) {
+        const key = `${filePath}|${maxWidth}`;
+        const hit = thumbCache.get(key);
+        if (hit) return hit;
+        const img = nativeImage.createFromPath(filePath);
+        if (img.isEmpty()) return null;
+        const size = img.getSize();
+        // 已经够小就原样返回，不必重编码
+        const buf = size.width <= maxWidth
+            ? img.toPNG()
+            : img.resize({ width: maxWidth, quality: 'good' }).toPNG();
+        if (thumbCache.size >= THUMB_CACHE_MAX) thumbCache.delete(thumbCache.keys().next().value);
+        thumbCache.set(key, buf);
+        return buf;
+    }
+
     protocol.handle('media', async (request) => {
         // 路径放在 query 里，绕开 URL 规范化对盘符/中文的改写
-        const filePath = new URL(request.url).searchParams.get('p');
+        const url = new URL(request.url);
+        const filePath = url.searchParams.get('p');
         if (!filePath) return new Response('Bad Request', { status: 400 });
-        if (!MEDIA_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
+        const ext = path.extname(filePath).toLowerCase();
+        if (!MEDIA_EXTENSIONS.has(ext)) {
             return new Response('Forbidden', { status: 403 });
         }
         try {
@@ -64,6 +88,23 @@ function registerMediaProtocol() {
             if (!stat.isFile()) return new Response('Not Found', { status: 404 });
         } catch {
             return new Response('Not Found', { status: 404 });
+        }
+
+        const maxWidth = Number(url.searchParams.get('w'));
+        if (Number.isFinite(maxWidth) && maxWidth > 0 && THUMB_FORMAT.has(ext)) {
+            try {
+                const buf = await buildThumb(filePath, Math.round(maxWidth));
+                if (buf) {
+                    return new Response(buf, {
+                        headers: {
+                            'Content-Type': ext === '.bmp' ? 'image/bmp' : `image/${ext.slice(1)}`,
+                            'Cache-Control': 'no-cache',
+                        },
+                    });
+                }
+            } catch {
+                // 缩略图失败就退回原图，不能因为图搞崩页面
+            }
         }
         return net.fetch(pathToFileURL(filePath).toString());
     });

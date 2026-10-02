@@ -90,7 +90,8 @@ export default function HomePage() {
     const pending = games.map((g) => g.id).filter((id) => !dailyCache.has(id));
     if (pending.length === 0) return;
     let cancelled = false;
-    const timer = window.setTimeout(async () => {
+    // 让首帧先画完再开始预热，但不要拖太久——用户可能马上就切走再切回来
+    const raf = requestAnimationFrame(async () => {
       for (const id of pending) {
         if (cancelled) return;
         const [d, t] = await Promise.all([
@@ -102,12 +103,12 @@ export default function HomePage() {
           trendCache.set(id, Array.isArray(t) ? t : []);
         }
         // 逐个来，别和用户正在做的操作抢数据库
-        await new Promise((r) => window.setTimeout(r, 150));
+        await new Promise((r) => window.setTimeout(r, 60));
       }
-    }, 400);
+    });
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      cancelAnimationFrame(raf);
     };
   }, [games]);
 
@@ -227,7 +228,7 @@ function GameRail({
           >
             {game.poster_vertical && (
               <img
-                src={window.electronAPI.filePathToURL(game.poster_vertical)}
+                src={window.electronAPI.filePathToURL(game.poster_vertical, 44)}
                 alt=""
                 className="h-16 w-11 shrink-0 rounded-lg object-cover"
                 loading="lazy"
@@ -968,7 +969,7 @@ function LeaderboardTab() {
               {index + 1}
             </span>
             <img
-              src={window.electronAPI.filePathToURL(row.icon) || './assets/app-icon.png'}
+              src={window.electronAPI.filePathToURL(row.icon, 36) || './assets/app-icon.png'}
               alt=""
               className="size-9 shrink-0 rounded-lg object-cover"
             />
@@ -1037,7 +1038,7 @@ function LogTab() {
       {logs.map((log) => (
         <div key={log.id} className="glass glass-sheen flex items-center gap-3 rounded-xl p-3">
           <img
-            src={window.electronAPI.filePathToURL(log.icon) || './assets/app-icon.png'}
+            src={window.electronAPI.filePathToURL(log.icon, 36) || './assets/app-icon.png'}
             alt=""
             className="size-9 shrink-0 rounded-lg object-cover"
           />
