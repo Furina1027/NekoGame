@@ -8,7 +8,7 @@ import type {
   DailyTimePoint,
   LeaderboardEntry,
   LogEntry,
-  RunningStatus,
+  RunningGame,
   TrendPoint,
 } from './domain';
 
@@ -31,7 +31,8 @@ export interface ElectronAPI {
   getGameTimeData(): Promise<Game[]>;
   launchGame(gamePath: string): Promise<void>;
   onGameDataUpdated(cb: (data: unknown) => void): () => void;
-  onRunningStatusUpdated(cb: (status: RunningStatus) => void): () => void;
+  /** 主进程每 15 秒广播一次：正在运行的游戏 id 列表 */
+  onRunningStatusUpdated(cb: (games: RunningGame[]) => void): () => void;
 
   /* 文件选择 */
   openFile(): Promise<string | null>;
@@ -59,6 +60,14 @@ export interface ElectronAPI {
   browseDataFile(): Promise<{ success: boolean; path?: string; message?: string }>;
   resetDataFile(): Promise<{ success: boolean; path?: string; message?: string }>;
   getDataFilePath(): Promise<{ path: string }>;
+
+  /* 数据同步（独立窗口） */
+  saveSyncSettings(payload: { repoUrl: string; token: string }): void;
+  loadSyncSettings(): Promise<{ repoUrl: string; token: string } | null>;
+  uploadFirstData(): void;
+  downloadLastedData(payload?: { repoUrl: string; token: string }): void;
+  onSyncSettingsStatus(cb: (status: { success: boolean; message: string }) => void): () => void;
+  closeDataSyncWindow(): void;
 
   /* 通用 */
   openDataPath(path: string): void;

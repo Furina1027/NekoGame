@@ -1,7 +1,6 @@
-const { db2 } = require('../../../app/database');
-const db = db2;
 const {genAuthKey} = require("../../mihoyo/takumi");
 const {normalizeGachaBType, gachaBEndId, fetchGachaBPool, existingUids} = require('../../mihoyo/gachaLink');
+const { insertGachaLogs: insertGachaRows } = require("./insertGacha");
 
 /** GachaB.vue:250-251 的卡池列表，20011/20012/20021/20022 是注释掉的细分池，不单独请求 */
 const GACHA_POOLS = [
@@ -10,44 +9,22 @@ const GACHA_POOLS = [
 ];
 
 async function insertGachaLogs(logs) {
-    let insertedCount = 0;
-    const insertPromises = logs.map(log => {
-        return new Promise((resolve, reject) => {
-            // 修正字段映射，兼容不同的 API 返回格式
-            const id = log.id;
-            const uid = log.uid;
-            const gacha_id = log.schedule_id || log.gacha_id || "";
-            // 对齐 TeyvatGuide userGachaB.ts:37：非 1000 一律收敛成 2000
-            const gacha_type = normalizeGachaBType(log.op_gacha_type || log.gacha_type);
-            const item_id = log.item_id || "";
-            const count = log.count || 1; // 默认 1
-            const time = log.time;
-            const name = log.item_name || log.name || "";
-            const lang = log.lang || "zh-cn";
-            const item_type = log.item_type || "";
-            const rank_type = log.rank_type || "";
-
-            db.run(
-                `INSERT OR IGNORE INTO miliastra_gacha (id, uid, gacha_id, gacha_type, item_id, count, time, name, lang, item_type, rank_type) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [id, uid, gacha_id, gacha_type, item_id, count, time, name, lang, item_type, rank_type],
-                function (err) {
-                    if (err) {
-                        reject(`插入失败: ${err.message}`);
-                    } else {
-                        if (this.changes > 0) {
-                            insertedCount++;
-                        }
-                        resolve();
-                    }
-                }
-            );
-        });
-    });
-    // 等待所有插入操作完成
-    await Promise.all(insertPromises);
-    console.log(`成功插入 ${insertedCount} 条数据`);
-    return insertedCount;
+    // GachaB 接口的字段名与其它游戏不同，先归一化到表字段，再走共享的事务批量插入
+    const normalized = logs.map(log => ({
+        id: log.id,
+        uid: log.uid,
+        gacha_id: log.schedule_id || log.gacha_id || "",
+        // 对齐 TeyvatGuide userGachaB.ts:37：非 1000 一律收敛成 2000
+        gacha_type: normalizeGachaBType(log.op_gacha_type || log.gacha_type),
+        item_id: log.item_id || "",
+        count: log.count || 1, // 默认 1
+        time: log.time,
+        name: log.item_name || log.name || "",
+        lang: log.lang || "zh-cn",
+        item_type: log.item_type || "",
+        rank_type: log.rank_type || "",
+    }));
+    return insertGachaRows('miliastra_gacha', normalized);
 }
 
 async function fetchMiliastraGachaData(event) {

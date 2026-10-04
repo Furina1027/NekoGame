@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import dayjs from 'dayjs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -31,8 +31,8 @@ export function ContributionHeatmap({
   data: { date: string; total_time: number }[];
   weeks?: number;
 }) {
-  const [hovered, setHovered] = useState<{ x: number; y: number; label: string } | null>(null);
-
+  // 提示统一交给 Radix Tooltip：之前每个格子还挂了一套自绘浮层，
+  // 悬停时同屏出现两个内容相同的提示，且每次 hover 都让整张热力图重渲染
   const { columns, monthMarkers } = useMemo(() => {
     const byDate = new Map(data.map((d) => [d.date, d.total_time / 3600]));
     // 对齐到本周日结束，逐列（周）填充
@@ -115,14 +115,6 @@ export function ContributionHeatmap({
                           <button
                             type="button"
                             disabled={cell.hours === null}
-                            onMouseEnter={(e) =>
-                              setHovered({
-                                x: e.clientX,
-                                y: e.clientY,
-                                label: `${cell.date} · ${(cell.hours ?? 0).toFixed(1)} 小时`,
-                              })
-                            }
-                            onMouseLeave={() => setHovered(null)}
                             className={cn(
                               'size-3 rounded-[3px] transition-all duration-150',
                               cell.hours === null && 'bg-transparent',
@@ -142,15 +134,6 @@ export function ContributionHeatmap({
               </div>
             </div>
           </div>
-
-          {hovered && (
-            <div
-              className="glass-sheen pointer-events-none fixed z-50 rounded-md px-2 py-1 text-xs shadow-lg"
-              style={{ left: hovered.x + 12, top: hovered.y + 12 }}
-            >
-              {hovered.label}
-            </div>
-          )}
         </div>
       </CardContent>
     </Card>

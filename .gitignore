@@ -1,5 +1,6 @@
 node_modules
-dist_final
 dist
+dist_final
 out
 build_log.txt
+.idea

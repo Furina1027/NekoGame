@@ -7,9 +7,18 @@ require('./app/settings/dataFile');
 require("./app/console");  // 导入日志管理
 require('./utils/syncMessage'); //导入消息通知
 
+// 主进程不允许带着未处理异常静默跑飞：记进日志，用户反馈时才有迹可循
+process.on('unhandledRejection', (reason) => {
+    console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('[uncaughtException]', err);
+});
+
 
 const { initializeDatabase, getSetting, setSetting} = require('./app/database');
 const { startGameTracking, sendRunningStatus } = require('./app/gameTracker');
+const { isTrustedSender } = require('./app/trustedSender');
 const gotTheLock = app.requestSingleInstanceLock();
 
 // 开发模式下由 Vite dev server 提供渲染进程
@@ -161,7 +170,9 @@ function createWindow() {
         backgroundColor: '#16161c',
         show: false,
         webPreferences: {
-            sandbox: false,
+            // preload 只用 contextBridge / ipcRenderer 这类 Electron API，
+            // 不需要 Node，开沙箱把渲染进程 compromise 的影响面压到最小
+            sandbox: true,
             preload: path.join(__dirname, 'preload.js'), // 指定 preload 脚本
             contextIsolation: true,
             enableRemoteModule: false,
@@ -272,20 +283,29 @@ ipcMain.handle("save-setting", (event, key, value) => {
 });
 
 
-// 窗口控制事件
-ipcMain.on('window-minimize', () => mainWindow.minimize());
+// 窗口控制事件。dataSyncWindow 与主窗口共用同一 preload，
+// 这些 handler 都可能被任意窗口触发，mainWindow 必须判空。
+ipcMain.on('window-minimize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
+});
 ipcMain.on('window-maximize', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
     if (mainWindow.isMaximized()) {
         mainWindow.unmaximize();
     } else {
         mainWindow.maximize();
     }
 });
-ipcMain.on('window-close', () => mainWindow.close());
-ipcMain.on('window-is-maximized', (event) => {
-    event.returnValue = mainWindow.isMaximized();
+ipcMain.on('window-close', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
 });
-ipcMain.handle('window-maximized-state', () => mainWindow.isMaximized());
+ipcMain.on('window-is-maximized', (event) => {
+    event.returnValue = !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized();
+});
+ipcMain.handle('window-maximized-state', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    return mainWindow.isMaximized();
+});
 // 把最大化状态变化同步给渲染进程，标题栏据此切换还原/最大化图标
 ipcMain.on('window-state-change', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -331,10 +351,16 @@ app.whenReady().then(() => {
     registerMediaProtocol();
     initializeDatabase();
     initializeSettings();
-    // 启动后台进程检测，每20秒检测一次（由 gameTracker.js 设置间隔）
+    // 启动后台进程检测，每15秒检测一次（由 gameTracker.js 设置间隔）
     startGameTracking();
-    module.exports = { createWindow, DATA_SYNC_URL, DEV_SERVER_URL };
-    require('./app/uploadData/uploadDataIpc');  // 初始化上传代码
+    // 数据同步延后到窗口加载完再跑：initUpload 内部有多次网络往返，
+    // 在模块加载时立即执行会拖慢启动；网络失败也不能变成未处理 rejection
+    const { initUpload } = require('./app/uploadData/uploadDataIpc');
+    setTimeout(() => {
+        initUpload({ allowRestart: true }).catch((err) => {
+            console.error('启动时自动同步数据失败:', err);
+        });
+    }, 5000);
 });
 
 // 触发运行状态更新通知
@@ -350,13 +376,26 @@ ipcMain.on('request-running-status', (event) => {
 
 // 开机自启动
 ipcMain.handle("set-auto-launch", (event, enabled) => {
-    app.setLoginItemSettings({ openAtLogin: enabled });
+    if (!isTrustedSender(event)) return;
+    app.setLoginItemSettings({ openAtLogin: enabled === true });
 });
 
 ipcMain.on('open-external', (event, url) => {
-    if (url) {
-        shell.openExternal(url);
+    if (!isTrustedSender(event)) return;
+    // Windows 上 shell.openExternal 对 file:/// 会用 ShellExecute 直接运行程序，
+    // ms-settings: 等协议也能被滥用，只放行网页链接
+    if (typeof url !== 'string') return;
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return;
     }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        console.error(`已拒绝打开非网页协议: ${url}`);
+        return;
+    }
+    shell.openExternal(url);
 });
 
 app.on('window-all-closed', () => {

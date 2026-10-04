@@ -1,5 +1,5 @@
 const { URL, URLSearchParams } = require('url');
-const { get } = require('axios');
+const { getGacha } = require('../../mihoyo/http');
 
 async function fetchGachaRecords(allRecords, GACHA_TYPE_MAP, gachaUrl, event) {
 
@@ -29,8 +29,8 @@ async function fetchGachaRecords(allRecords, GACHA_TYPE_MAP, gachaUrl, event) {
 
                 const urlWithParams = `${parsedUrl.origin}${endpointPath}?${queryParams.toString()}`;
 
-                const response = await get(urlWithParams);
-                const data = response.data;
+                // 走带 15s 超时的封装：全局 axios 默认无超时，接口挂起会卡死整个刷新
+                const data = await getGacha(urlWithParams);
 
                 console.log(`获取 ${gachaName} 第 ${page} 页数据...`);
                 event.sender.send('gacha-records-status', `获取 ${gachaName} 第 ${page} 页数据...`);

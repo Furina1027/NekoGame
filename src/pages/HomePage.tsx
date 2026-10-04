@@ -7,8 +7,10 @@ import {
   LayoutDashboard,
   Layers,
   Flame,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
@@ -26,6 +28,7 @@ import { ContributionHeatmap } from '@/components/library/ContributionHeatmap';
 import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/utils';
 import { formatDuration, formatHours, fromNow } from '@/lib/format';
+import { gameColor, seriesBorderColor, withAlpha } from '@/lib/chart-color';
 import { useToast } from '@/hooks/useToast';
 import type { DailyTimePoint, Game, LogEntry, NamedTimePoint, TrendPoint } from '@/types/domain';
 
@@ -60,21 +63,33 @@ type GameFilter = number | null;
 export default function HomePage() {
   const [tab, setTab] = useState('overview');
   const [games, setGames] = useState<Game[]>([]);
+  const [gamesError, setGamesError] = useState(false);
   const [filter, setFilter] = useState<GameFilter>(null);
   const [running, setRunning] = useState<Set<number>>(new Set());
 
+  const loadGames = useCallback(async () => {
+    setGamesError(false);
+    try {
+      const rows = await window.electronAPI.getGameTimeData();
+      setGames(Array.isArray(rows) ? rows : []);
+    } catch {
+      // 之前失败被静默吞掉，界面误显示「还没有游戏」——要区分错误态
+      setGamesError(true);
+    }
+  }, []);
+
   useEffect(() => {
     window.electronAPI.send('request-running-status');
-    const off = window.electronAPI.onRunningStatusUpdated((status) => {
-      const list = Array.isArray(status) ? status : (status?.games ?? []);
-      setRunning(new Set(list.filter((g) => g.isRunning).map((g) => g.id)));
+    const off = window.electronAPI.onRunningStatusUpdated((list) => {
+      // 主进程每 15 秒广播一次；内容没变时保持旧引用，避免整棵主页全量重渲染
+      const next = new Set((Array.isArray(list) ? list : []).filter((g) => g.isRunning).map((g) => g.id));
+      setRunning((prev) =>
+        prev.size === next.size && [...prev].every((id) => next.has(id)) ? prev : next,
+      );
     });
-    window.electronAPI
-      .getGameTimeData()
-      .then((rows) => setGames(rows))
-      .catch(() => {});
+    void loadGames();
     return off;
-  }, []);
+  }, [loadGames]);
 
   // 当前选中的游戏；被删除后回落到「全部」
   const active = useMemo(
@@ -142,6 +157,8 @@ export default function HomePage() {
               running={running}
               activeId={filter}
               onSelect={setFilter}
+              error={gamesError}
+              onRetry={loadGames}
             />
             <OverviewTab filter={active} />
           </div>
@@ -166,12 +183,32 @@ function GameRail({
   running,
   activeId,
   onSelect,
+  error,
+  onRetry,
 }: {
   games: Game[];
   running: Set<number>;
   activeId: GameFilter;
   onSelect: (id: GameFilter) => void;
+  error: boolean;
+  onRetry: () => void;
 }) {
+  if (error && games.length === 0) {
+    return (
+      <EmptyState
+        icon={Layers}
+        title="时长数据加载失败"
+        description="主进程可能暂时不可用，稍后可重试。"
+        action={
+          <Button variant="secondary" onClick={onRetry}>
+            <RefreshCw />
+            重试
+          </Button>
+        }
+      />
+    );
+  }
+
   if (games.length === 0) {
     return (
       <EmptyState
@@ -192,6 +229,7 @@ function GameRail({
       <button
         type="button"
         onClick={() => onSelect(null)}
+        aria-pressed={activeId === null}
         className={cn(
           'flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm transition-all duration-200',
           'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
@@ -216,6 +254,7 @@ function GameRail({
             key={game.id}
             type="button"
             onClick={() => onSelect(isActive ? null : game.id)}
+            aria-pressed={isActive}
             title={`${game.name} · 累计 ${formatHours(game.total_time)}`}
             className={cn(
               'group relative flex w-full items-center gap-3 overflow-hidden rounded-xl border p-2.5 text-left',
@@ -353,14 +392,18 @@ function AllGamesPanel() {
     }
   }, [load, toast]);
 
+  // weekly 数据实际横跨半年（每行带日期），「近 7 天」在这里按日期过滤；
+  // 之前 weeklyRange 只喂给了选择器本身，切换后图表纹丝不动（死控件）
   const weeklyChart = useMemo(() => {
+    const minDate = weeklyRange === 'week' ? dayjs().subtract(6, 'day').format('YYYY-MM-DD') : null;
     const byGame = new Map<string, number>();
     for (const item of weekly) {
+      if (minDate && (item.date ?? '') < minDate) continue;
       byGame.set(item.game_name, (byGame.get(item.game_name) ?? 0) + item.total_time);
     }
     const entries = [...byGame.entries()].sort((a, b) => b[1] - a[1]);
     return { labels: entries.map(([k]) => k), values: entries.map(([, v]) => v / 3600) };
-  }, [weekly]);
+  }, [weekly, weeklyRange]);
 
   const monthlyChart = useMemo(() => {
     const buckets = new Map<string, number>();
@@ -412,7 +455,7 @@ function AllGamesPanel() {
   );
 
   const axis = useChartAxis(colors);
-  const tooltipStyle = useChartTooltip(colors);
+  const tooltipStyle = useChartTooltip();
 
   return (
     <div className="flex flex-col gap-4">
@@ -430,8 +473,8 @@ function AllGamesPanel() {
         />
         <StatCard
           label="数据更新时间"
-          value={<span className="text-lg">{updatedAt ? updatedAt.slice(11, 16) : '--:--'}</span>}
-          hint={updatedAt ? updatedAt.slice(0, 10) : '尚未刷新'}
+          value={<span className="text-lg">{updatedAt ? dayjs(updatedAt).format('HH:mm') : '--:--'}</span>}
+          hint={updatedAt ? dayjs(updatedAt).format('YYYY-MM-DD') : '尚未刷新'}
         />
         <div className="flex items-end">
           <Button onClick={refresh} disabled={refreshing} variant="secondary" size="sm">
@@ -460,6 +503,7 @@ function AllGamesPanel() {
             swapKey={swapSeq}
             type="line"
             height={240}
+            ariaLabel="游戏总时长趋势"
             data={{
               labels: monthlyChart.labels.map((l) => l.slice(5)),
               datasets: [
@@ -467,7 +511,7 @@ function AllGamesPanel() {
                   label: '总时长',
                   data: monthlyChart.values,
                   borderColor: colors.series[0],
-                  backgroundColor: 'oklch(0.8 0.115 195 / 0.14)',
+                  backgroundColor: withAlpha(colors.series[0], 0.14),
                   fill: true,
                   tension: 0.35,
                   pointRadius: 0,
@@ -477,7 +521,7 @@ function AllGamesPanel() {
                 {
                   label: `平均 ${monthlyChart.average.toFixed(1)} 小时`,
                   data: monthlyChart.values.map(() => monthlyChart.average),
-                  borderColor: 'oklch(0.78 0.12 340 / 0.7)',
+                  borderColor: withAlpha(colors.series[1], 0.7),
                   borderDash: [5, 5],
                   pointRadius: 0,
                   borderWidth: 1.5,
@@ -500,7 +544,7 @@ function AllGamesPanel() {
 
         <ChartCard
           title="游戏时长分布"
-          description="各游戏的累计游玩时长"
+          description={weeklyRange === 'week' ? '各游戏近 7 天的游玩时长' : '各游戏的累计游玩时长'}
           action={
             <RangeSelect
               value={weeklyRange}
@@ -516,14 +560,16 @@ function AllGamesPanel() {
             swapKey={swapSeq}
             type="bar"
             height={240}
+            ariaLabel="游戏时长分布条形图"
             data={{
               labels: weeklyChart.labels,
               datasets: [
                 {
                   label: '时长',
                   data: weeklyChart.values,
-                  backgroundColor: 'oklch(0.8 0.115 195 / 0.75)',
-                  hoverBackgroundColor: 'oklch(0.85 0.13 195)',
+                  // 每个游戏固定一色，与占比环图、多线趋势图一一对应
+                  backgroundColor: weeklyChart.labels.map((name) => gameColor(name)),
+                  hoverBackgroundColor: weeklyChart.labels.map((name) => gameColor(name)),
                   borderRadius: 6,
                   maxBarThickness: 22,
                 },
@@ -562,13 +608,14 @@ function AllGamesPanel() {
             swapKey={swapSeq}
             type="line"
             height={240}
+            ariaLabel="各游戏时长趋势"
             data={{
               labels: halfYearChart.labels.map((l) => l.slice(5)),
-              datasets: halfYearChart.datasets.map((d, i) => ({
+              datasets: halfYearChart.datasets.map((d) => ({
                 label: d.label,
                 data: d.data,
-                borderColor: colors.series[i % colors.series.length],
-                backgroundColor: colors.series[i % colors.series.length],
+                borderColor: gameColor(d.label),
+                backgroundColor: gameColor(d.label),
                 tension: 0.3,
                 borderWidth: 2,
                 pointRadius: 0,
@@ -603,15 +650,14 @@ function AllGamesPanel() {
             swapKey={swapSeq}
             type="doughnut"
             height={240}
+            ariaLabel="游戏总时长占比环形图"
             data={{
               labels: distributionChart.labels,
               datasets: [
                 {
                   data: distributionChart.values,
-                  backgroundColor: distributionChart.labels.map(
-                    (_, i) => colors.series[i % colors.series.length],
-                  ),
-                  borderColor: 'oklch(0.17 0.014 275)',
+                  backgroundColor: distributionChart.labels.map((name) => gameColor(name)),
+                  borderColor: seriesBorderColor(),
                   borderWidth: 2,
                   hoverOffset: 6,
                 },
@@ -726,7 +772,7 @@ function SingleGamePanel({ game }: { game: Game }) {
   }, [daily]);
 
   const axis = useChartAxis(colors);
-  const tooltipStyle = useChartTooltip(colors);
+  const tooltipStyle = useChartTooltip();
 
   return (
     <div className="flex flex-col gap-4">
@@ -798,6 +844,7 @@ function SingleGamePanel({ game }: { game: Game }) {
                 swapKey={swapSeq}
                 type="line"
                 height={220}
+                ariaLabel="时长趋势"
                 data={{
                   labels: trendChart.labels.map((l: string) => l.slice(5)),
                   datasets: [
@@ -805,7 +852,7 @@ function SingleGamePanel({ game }: { game: Game }) {
                       label: '时长',
                       data: trendChart.values,
                       borderColor: colors.series[0],
-                      backgroundColor: 'oklch(0.8 0.115 195 / 0.14)',
+                      backgroundColor: withAlpha(colors.series[0], 0.14),
                       fill: true,
                       tension: 0.35,
                       pointRadius: 0,
@@ -815,7 +862,7 @@ function SingleGamePanel({ game }: { game: Game }) {
                     {
                       label: `平均 ${trendChart.average.toFixed(1)} 小时`,
                       data: trendChart.values.map(() => trendChart.average),
-                      borderColor: 'oklch(0.78 0.12 340 / 0.7)',
+                      borderColor: withAlpha(colors.series[1], 0.7),
                       borderDash: [5, 5],
                       pointRadius: 0,
                       borderWidth: 1.5,
@@ -842,14 +889,15 @@ function SingleGamePanel({ game }: { game: Game }) {
                 swapKey={swapSeq}
                 type="bar"
                 height={220}
+                ariaLabel="每周时长柱状图"
                 data={{
                   labels: weeklyChart.labels,
                   datasets: [
                     {
                       label: '时长',
                       data: weeklyChart.values,
-                      backgroundColor: 'oklch(0.8 0.115 195 / 0.7)',
-                      hoverBackgroundColor: 'oklch(0.85 0.13 195)',
+                      backgroundColor: colors.series[0],
+                      hoverBackgroundColor: colors.series[0],
                       borderRadius: 5,
                       maxBarThickness: 26,
                     },
@@ -874,6 +922,7 @@ function SingleGamePanel({ game }: { game: Game }) {
               swapKey={swapSeq}
               type="doughnut"
               height={220}
+              ariaLabel="星期分布环形图"
               data={{
                 labels: weekdayChart.labels,
                 datasets: [
@@ -882,7 +931,7 @@ function SingleGamePanel({ game }: { game: Game }) {
                     backgroundColor: weekdayChart.labels.map(
                       (_, i) => colors.series[i % colors.series.length],
                     ),
-                    borderColor: 'oklch(0.17 0.014 275)',
+                    borderColor: seriesBorderColor(),
                     borderWidth: 2,
                     hoverOffset: 6,
                   },
@@ -936,7 +985,19 @@ function LeaderboardTab() {
     };
   }, []);
 
-  if (loading) return null;
+  if (loading) {
+    // 之前加载中直接返回 null，切到排行榜是一片白屏
+    return (
+      <div className="grid gap-4 xl:grid-cols-[300px_1fr]">
+        <Skeleton className="h-32" />
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-16" />
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (rows.length === 0) return <EmptyState icon={Trophy} title="暂无排行数据" />;
 
   const max = Math.max(...rows.map((r) => r.total_time), 1);
@@ -999,10 +1060,14 @@ function LogTab() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [page, setPage] = useState(0);
   const [done, setDone] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingRef = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
+    loadingRef.current = true;
+    setLoadingMore(true);
     window.electronAPI
       .getLogData(page)
       .then((rows) => {
@@ -1010,7 +1075,14 @@ function LogTab() {
         setLogs((prev) => [...prev, ...rows]);
         if (rows.length < LOG_PAGE_SIZE) setDone(true);
       })
-      .catch(() => setDone(true));
+      .catch(() => {
+        if (!cancelled) setDone(true);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        loadingRef.current = false;
+        setLoadingMore(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -1021,7 +1093,9 @@ function LogTab() {
     if (!node) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !done) setPage((p) => p + 1);
+        // in-flight 守卫：请求未返回前 sentinel 反复进出视口，
+        // 会发出并发分页请求，追加顺序取决于完成顺序，日志可能乱序
+        if (entries[0].isIntersecting && !done && !loadingRef.current) setPage((p) => p + 1);
       },
       { rootMargin: '200px' },
     );
@@ -1062,6 +1136,12 @@ function LogTab() {
         </div>
       ))}
       <div ref={sentinelRef} className="h-8" />
+      {loadingMore && (
+        <p className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          正在加载…
+        </p>
+      )}
       {done && logs.length > 0 && (
         <p className="py-2 text-center text-xs text-muted-foreground">没有更多记录了</p>
       )}
@@ -1107,19 +1187,21 @@ function useChartAxis(colors: { grid: string; muted: string }) {
   );
 }
 
-function useChartTooltip(colors: { text: string; muted: string }) {
+function useChartTooltip() {
   return useMemo(
     () => ({
       backgroundColor: 'oklch(0.22 0.017 275 / 0.95)',
       borderColor: 'oklch(1 0 0 / 0.1)',
       borderWidth: 1,
-      titleColor: colors.text,
-      bodyColor: colors.muted,
+      // 提示框底色固定是深色，文字必须固定配浅色：之前文字跟主题走，
+      // 一旦主题变量是深色系（浅色主题的 token），悬浮提示就深底配深字看不见了
+      titleColor: 'oklch(0.97 0.004 275)',
+      bodyColor: 'oklch(0.74 0.015 275)',
       padding: 10,
       cornerRadius: 8,
       displayColors: true,
       boxPadding: 4,
     }),
-    [colors],
+    [],
   );
 }

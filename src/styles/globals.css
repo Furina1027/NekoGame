@@ -280,10 +280,11 @@ html.dark[data-bg-style='floating'] {
     -webkit-app-region: no-drag;
   }
 
+  /* outline 会自动跟随元素圆角，不要在这里改 border-radius——
+     之前写死 4px，键盘聚焦 rounded-xl 的按钮时圆角会瞬间跳变 */
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
-    border-radius: 4px;
   }
 
   /* Text stays selectable; only chrome is not. */

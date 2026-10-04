@@ -25,11 +25,13 @@ import { Chart } from '@/components/chart/Chart';
 import { ContributionHeatmap } from '@/components/library/ContributionHeatmap';
 import { GameFormDialog } from '@/components/library/GameFormDialog';
 import { useTheme } from '@/hooks/useTheme';
+import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 import { formatDuration, formatHours, fromNow } from '@/lib/format';
 import type { DailyTimePoint, Game, GameDataInput, GameDetails } from '@/types/domain';
 
 export default function LibraryPage() {
+  const toast = useToast();
   const [games, setGames] = useState<Game[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [details, setDetails] = useState<GameDetails | null>(null);
@@ -46,10 +48,12 @@ export default function LibraryPage() {
       const rows = await window.electronAPI.loadGames();
       setGames(rows);
       setSelectedId((prev) => (prev && rows.some((g) => g.id === prev) ? prev : (rows[0]?.id ?? null)));
+    } catch (err) {
+      toast.error('加载游戏库失败', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     void loadGames();
@@ -73,11 +77,13 @@ export default function LibraryPage() {
       setDetails(d);
       setDaily(Array.isArray(day) ? day : []);
       setTrend(Array.isArray(tr) ? tr : []);
-    })();
+    })().catch((err) => {
+      if (!cancelled) toast.error('加载游戏详情失败', err instanceof Error ? err.message : String(err));
+    });
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedId, toast]);
 
   const submitGame = useCallback(
     async (data: GameDataInput) => {
@@ -93,11 +99,15 @@ export default function LibraryPage() {
 
   const removeGame = useCallback(async () => {
     if (selectedId == null) return;
-    await window.electronAPI.deleteGame(selectedId);
-    setConfirmDelete(false);
-    setSelectedId(null);
-    await loadGames();
-  }, [selectedId, loadGames]);
+    try {
+      await window.electronAPI.deleteGame(selectedId);
+      setConfirmDelete(false);
+      setSelectedId(null);
+      await loadGames();
+    } catch (err) {
+      toast.error('删除游戏失败', err instanceof Error ? err.message : String(err));
+    }
+  }, [selectedId, loadGames, toast]);
 
   return (
     <div className="flex h-full flex-col gap-5 p-5">
@@ -154,7 +164,7 @@ export default function LibraryPage() {
               trend={trend}
               onEdit={() => {
                 setEditing({
-                  id: details.path ? selectedId! : selectedId!,
+                  id: selectedId ?? undefined,
                   name: details.name,
                   path: details.path,
                   icon: details.icon,

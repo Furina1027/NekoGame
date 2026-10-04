@@ -1,4 +1,4 @@
-﻿import type { CommonItem } from '@/lib/gacha';
+import type { CommonItem } from '@/lib/gacha';
 
 export type GameId = 'genshin' | 'starrail' | 'zzz' | 'miliastra';
 

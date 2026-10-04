@@ -40,7 +40,7 @@ import { Label } from '@/components/ui/label';
 import { PageHeader, EmptyState } from '@/components/common/Primitives';
 import { OverviewCard } from './OverviewCard';
 import { PoolCard } from './PoolCard';
-import { GACHA_GAMES, isGameId, ruleFor } from './config';
+import { GACHA_GAMES, isGameId, ruleFor, type PoolRule } from './config';
 import { groupByPool, type CommonItem, type GachaRecord } from '@/lib/gacha';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
@@ -108,10 +108,16 @@ export default function GachaPage() {
       setUids(Array.isArray(uidList) ? uidList : []);
       const next = uid && uidList.includes(uid) ? uid : (lastUid ?? uidList[0] ?? '');
       setUid(next ?? '');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setUids([]);
+      setRecords([]);
+      setStatus(`加载数据失败：${message}`);
+      toast.error('加载数据失败', message);
     } finally {
       setLoading(false);
     }
-  }, [config, uid]);
+  }, [config, uid, toast]);
 
   useEffect(() => {
     void loadAll();
@@ -125,7 +131,8 @@ export default function GachaPage() {
     }
     let cancelled = false;
     void (async () => {
-      const rows = (await window.electronAPI.invoke(config.channels.records)) as GachaRecord[];
+      // uid 下推到主进程过滤：表可达数万行，不用全表过 IPC 后前端再筛
+      const rows = (await window.electronAPI.invoke(config.channels.records, uid)) as GachaRecord[];
       if (cancelled) return;
       const mine = Array.isArray(rows) ? rows.filter((r) => r.uid === uid) : [];
       setRecords(mine);
@@ -139,11 +146,26 @@ export default function GachaPage() {
         mine[0].lang || 'zh-cn',
       )) as CommonItem[];
       if (!cancelled) setCommonItems(Array.isArray(items) ? items : []);
-    })();
+    })().catch((err) => {
+      if (cancelled) return;
+      const message = err instanceof Error ? err.message : String(err);
+      setStatus(`加载抽卡记录失败：${message}`);
+      toast.error('加载抽卡记录失败', message);
+    });
     return () => {
       cancelled = true;
     };
-  }, [config, uid, reloadToken]);
+  }, [config, uid, reloadToken, toast]);
+
+  // rule 对象一次算齐：JSX 里内联 ruleFor() 每次渲染都返回新对象，
+  // 会让 RecordList 里依赖 rule 的 useMemo 缓存全部失效
+  const rules = useMemo(() => {
+    const map = new Map<string, PoolRule>();
+    if (config) {
+      for (const name of config.poolOrder) map.set(name, ruleFor(config, name));
+    }
+    return map;
+  }, [config]);
 
   const pools = useMemo(() => {
     if (!config) return [];
@@ -188,15 +210,17 @@ export default function GachaPage() {
 
   const runChannel = useCallback(
     async (channel: string | undefined, successText: string, ...args: unknown[]) => {
-      if (!channel) return;
+      if (!channel) return false;
       try {
         await window.electronAPI.invoke(channel, ...args);
         toast.success(successText);
+        return true;
       } catch (err) {
         toast.error('操作失败', err instanceof Error ? err.message : String(err));
+        return false;
       }
     },
-    [],
+    [toast],
   );
 
   if (!config) {
@@ -272,7 +296,12 @@ export default function GachaPage() {
               </DropdownMenuItem>
               {config.hasImport && (
                 <DropdownMenuItem
-                  onSelect={() => runChannel(config.channels.importData, '导入完成')}
+                  onSelect={() =>
+                    void runChannel(config.channels.importData, '导入完成').then((ok) => {
+                      // 导入改变了记录，必须重拉一次，否则界面还是旧数据
+                      if (ok) setReloadToken((t) => t + 1);
+                    })
+                  }
                 >
                   <Upload />
                   导入数据
@@ -326,7 +355,7 @@ export default function GachaPage() {
               <PoolCard
                 key={pool.name}
                 config={config}
-                rule={ruleFor(config, pool.name)}
+                rule={rules.get(pool.name) ?? ruleFor(config, pool.name)}
                 records={pool.records}
                 commonItems={commonItems}
               />
@@ -365,6 +394,7 @@ export default function GachaPage() {
         uids={uids}
         defaultUid={uid}
         config={config}
+        onDeleted={() => setReloadToken((t) => t + 1)}
       />
     </div>
   );
@@ -540,12 +570,14 @@ function DeleteByTimeDialog({
   uids,
   defaultUid,
   config,
+  onDeleted,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   uids: string[];
   defaultUid: string;
   config: (typeof GACHA_GAMES)[keyof typeof GACHA_GAMES];
+  onDeleted: () => void;
 }) {
   const toast = useToast();
   const [uid, setUid] = useState(defaultUid);
@@ -664,6 +696,7 @@ function DeleteByTimeDialog({
                 );
                 toast.success('已删除对应时间段内的抽卡记录');
                 onOpenChange(false);
+                onDeleted();
               } catch (err) {
                 toast.error('删除失败', err instanceof Error ? err.message : String(err));
               } finally {

@@ -1,15 +1,85 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 let appPath = '';
-let dbPath = '';
-
-ipcRenderer.on('set-db-path', (_, path) => {
-  dbPath = path;
-});
 
 ipcRenderer.on('set-app-path', (_, path) => {
   appPath = path;
 });
+
+/**
+ * 通用 on/send/invoke 的通道白名单。
+ * 白名单之外的通道一律拒绝——否则这三个兜底方法会让渲染层
+ * 可以触达主进程注册的任意 IPC（包括覆盖数据库、改自启动这种高危通道）。
+ */
+const INVOKE_CHANNELS = new Set([
+  // 设置 / 通用
+  'load-settings',
+  'save-setting',
+  'set-auto-launch',
+  'open-common-items',
+  // 米游社账号
+  'mhy-account-info',
+  'mhy-login-create-qr',
+  'mhy-login-poll',
+  'mhy-logout',
+  'mhy-set-preferred-uid',
+  // 抽卡链接
+  'getGenshinWishLink',
+  'getStarRailUrl',
+  // 抽卡模块（config.ts 的 channels）
+  'get-genshin-player-uids',
+  'get-genshin-gacha-records',
+  'get-last-genshin-uid',
+  'fetchGenshinGachaData',
+  'export-genshin-data',
+  'import-genshin-data',
+  'clear-genshin-url-cache',
+  'get-starRail-player-uids',
+  'get-starRail-gacha-records',
+  'get-last-starRail-uid',
+  'fetchStarRailGachaData',
+  'export-starRail-data',
+  'import-starRail-data',
+  'clear-starRail-url-cache',
+  'get-zzz-player-uids',
+  'get-zzz-gacha-records',
+  'get-last-zzz-uid',
+  'fetchZzzGachaData',
+  'export-zzz-data',
+  'import-zzz-data',
+  'clear-zzz-url-cache',
+  'get-miliastra-player-uids',
+  'get-miliastra-gacha-records',
+  'get-last-miliastra-uid',
+  'fetchMiliastraGachaData',
+  'export-miliastra-data',
+  // 卡池记录维护
+  'get-common-items',
+  'count-gacha-records-by-time',
+  'delete-gacha-records-by-time',
+]);
+
+const SEND_CHANNELS = new Set([
+  'openDataSyncWindow',
+  'closeDataSyncWindow',
+  'request-running-status',
+]);
+
+const LISTEN_CHANNELS = new Set([
+  'syncSettingsStatus',
+  'gacha-records-status',
+  // 命名方法内部也走 subscribe()，这些通道同样要在白名单里
+  'window-maximized-changed',
+  'game-data-updated',
+  'running-status-updated',
+  'background-settings',
+]);
+
+function assertAllowed(set, channel, method) {
+  if (!set.has(channel)) {
+    throw new Error(`未授权的 IPC 通道 (${method}): ${channel}`);
+  }
+}
 
 /**
  * 把数据库里存的图片路径转成可加载的 URL。
@@ -38,6 +108,7 @@ function filePathToURL(filePath, maxWidth) {
  * 导致整棵组件树崩溃。
  */
 function subscribe(channel, callback) {
+  assertAllowed(LISTEN_CHANNELS, channel, 'on');
   const listener = (_event, ...args) => callback(...args);
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
@@ -90,13 +161,26 @@ const api = {
   resetDataFile: () => ipcRenderer.invoke('reset-dataFile'),
   getDataFilePath: () => ipcRenderer.invoke('get-dataFile-path'),
 
+  // ---- 数据同步（独立窗口） ----
+  saveSyncSettings: (payload) => ipcRenderer.send('saveSyncSettings', payload),
+  loadSyncSettings: () => ipcRenderer.invoke('load-sync-settings'),
+  uploadFirstData: () => ipcRenderer.send('uploadFirstData'),
+  downloadLastedData: (payload) => ipcRenderer.send('downloadLastedData', payload),
+  onSyncSettingsStatus: (callback) => subscribe('syncSettingsStatus', callback),
+
   // ---- 通用 ----
   openDataPath: (path) => ipcRenderer.send('open-data-path', path),
   openExternal: (url) => ipcRenderer.send('open-external', url),
-  /** 返回取消订阅函数，可直接用作 useEffect 的 cleanup */
+  /** 白名单内的通道订阅，返回取消订阅函数，可直接用作 useEffect 的 cleanup */
   on: (channel, listener) => subscribe(channel, listener),
-  send: (channel, data) => ipcRenderer.send(channel, data),
-  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+  send: (channel, data) => {
+    assertAllowed(SEND_CHANNELS, channel, 'send');
+    ipcRenderer.send(channel, data);
+  },
+  invoke: (channel, ...args) => {
+    assertAllowed(INVOKE_CHANNELS, channel, 'invoke');
+    return ipcRenderer.invoke(channel, ...args);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

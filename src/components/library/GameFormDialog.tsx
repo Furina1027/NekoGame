@@ -120,7 +120,7 @@ export function GameFormDialog({ open, initial, onOpenChange, onSubmit }: GameFo
                   )}
                 >
                   <img
-                    src={window.electronAPI.filePathToURL(images[field])}
+                    src={window.electronAPI.filePathToURL(images[field], 160)}
                     alt={FIELD_META[field].label}
                     className="size-full object-cover"
                   />

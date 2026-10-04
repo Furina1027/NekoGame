@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Chart } from '@/components/chart/Chart';
-import { resolveCssColor } from '@/lib/chart-color';
+import { resolveCssColor, seriesBorderColor } from '@/lib/chart-color';
 import { groupByPool, type GachaRecord } from '@/lib/gacha';
 import type { GachaGameConfig } from './config';
 
@@ -104,7 +104,8 @@ function Pie({
         {
           data: values,
           backgroundColor: colors,
-          borderColor: 'oklch(0.22 0.017 275)',
+          // 描边走面板底色 token，与全应用的环形图一致；之前这里是硬编码深色，且和主页用的值不同
+          borderColor: seriesBorderColor(),
           borderWidth: 2,
         },
       ],
@@ -126,7 +127,14 @@ function Pie({
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
       <div className="flex items-center gap-4">
-        <Chart type="doughnut" height={150} className="w-[150px] shrink-0" data={data} options={options} />
+        <Chart
+          type="doughnut"
+          height={150}
+          className="w-[150px] shrink-0"
+          data={data}
+          options={options}
+          ariaLabel={`${title}饼图`}
+        />
         <ul className="flex min-w-0 flex-1 flex-col gap-1.5">
           {labels.map((label, i) => (
             <li key={label} className="flex items-center gap-2 text-xs">

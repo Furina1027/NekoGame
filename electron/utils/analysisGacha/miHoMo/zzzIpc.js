@@ -47,17 +47,16 @@ ipcMain.handle('get-zzz-player-uids', async () => {
 });
 
 
-ipcMain.handle('get-zzz-gacha-records', async () => {
+ipcMain.handle('get-zzz-gacha-records', async (event, uid) => {
     try {
-        const rows = await new Promise((resolve, reject) => {
-            db.all(
-                'SELECT * FROM zzz_gacha ORDER BY id DESC', // 按插入顺序倒序获取
-                (err, rows) => {
-                    if (err) return reject(err);
-                    resolve(rows);
-                }
-            );
-        });
+        // 只取当前 UID 的记录：表可达数万行，之前全表回传、渲染层再过滤
+        const rows = uid
+            ? await new Promise((resolve, reject) => {
+                db.all('SELECT * FROM zzz_gacha WHERE uid = ? ORDER BY id DESC', [uid], (err, rows) => (err ? reject(err) : resolve(rows)));
+            })
+            : await new Promise((resolve, reject) => {
+                db.all('SELECT * FROM zzz_gacha ORDER BY id DESC', (err, rows) => (err ? reject(err) : resolve(rows)));
+            });
         // 定义gacha_type对应的中文映射
         const gachaTypeMap = {
             "2": "独家频段",

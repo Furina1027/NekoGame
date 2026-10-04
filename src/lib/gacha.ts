@@ -69,11 +69,24 @@ export function groupByPool(records: GachaRecord[]): Record<string, GachaRecord[
 /**
  * 记录数组是「新 → 旧」倒序的（IPC 按 id DESC 返回）。
  * 以下函数沿用旧版语义：以数组下标差作为「距上一次该稀有度的抽数」。
+ * 所有下标查找都走预建的 Map：之前 map 里嵌 indexOf/findIndex，
+ * 复杂度 O(n²·m)，几千条记录的账号每次计算要几十毫秒。
  */
-function gapToNext(marks: GachaRecord[], all: GachaRecord[], index: number): number {
+function buildIndexMap(records: GachaRecord[]): Map<GachaRecord, number> {
+  const index = new Map<GachaRecord, number>();
+  records.forEach((r, i) => index.set(r, i));
+  return index;
+}
+
+function gapToNext(
+  marks: GachaRecord[],
+  indexOf: (r: GachaRecord) => number,
+  index: number,
+  total: number,
+): number {
   const next = marks[index + 1];
-  if (!next) return all.length;
-  return all.indexOf(next);
+  if (!next) return total;
+  return indexOf(next);
 }
 
 /** 距离上一次抽到指定稀有度已经用了多少抽（还没抽到则为全部） */
@@ -91,10 +104,12 @@ export function calculateMostDraws(
   const marks = records.filter((r) => r.quality_level === quality);
   if (marks.length === 0) return emptyText;
 
+  const indexOfRecord = buildIndexMap(records);
+  const indexOf = (r: GachaRecord) => indexOfRecord.get(r) as number;
   let maxDraws = 0;
   let minDraws = Number.MAX_VALUE;
   marks.forEach((mark, i) => {
-    const draws = gapToNext(marks, records, i) - records.indexOf(mark);
+    const draws = gapToNext(marks, (r) => indexOf(r), i, records.length) - indexOf(mark);
     maxDraws = Math.max(maxDraws, draws);
     minDraws = Math.min(minDraws, draws);
   });
@@ -109,9 +124,11 @@ export function calculateDrawsBetween(
 ): number | string {
   const marks = records.filter((r) => r.quality_level === quality);
   if (marks.length === 0) return emptyText;
+  const indexOfRecord = buildIndexMap(records);
+  const indexOf = (r: GachaRecord) => indexOfRecord.get(r) as number;
   let total = 0;
   marks.forEach((mark, i) => {
-    total += gapToNext(marks, records, i) - records.indexOf(mark);
+    total += gapToNext(marks, (r) => indexOf(r), i, records.length) - indexOf(mark);
   });
   return total / marks.length;
 }
@@ -130,9 +147,11 @@ export function calculateUpAverage(
       upPools.includes(r.card_pool_type),
   );
   if (upRecords.length === 0) return '还没抽出UP';
+  const indexOfRecord = buildIndexMap(records);
+  const indexOf = (r: GachaRecord) => indexOfRecord.get(r) as number;
   let total = 0;
   upRecords.forEach((r, i) => {
-    total += gapToNext(upRecords, records, i) - records.indexOf(r);
+    total += gapToNext(upRecords, (r) => indexOf(r), i, records.length) - indexOf(r);
   });
   return total / upRecords.length;
 }
@@ -251,23 +270,22 @@ export function annotateDraws(
   commonItems: CommonItem[],
   upPools: string[],
 ): (GachaRecord & { draws: number | null; offBanner: boolean })[] {
-  const topMarks = records.filter((r) => r.quality_level === topQuality);
-  const midMarks = records.filter((r) => r.quality_level === midQuality);
+  const total = records.length;
+  // 单趟倒序扫描：记住每种稀有度上一次出现的下标，直接算距离。
+  // 旧版在 map 里嵌 indexOf/findIndex，O(n²·m)，大账号刷新期间反复重算明显卡顿
+  const draws = new Array<number | null>(total).fill(null);
+  const lastSeen = new Map<number, number>();
+  for (let i = total - 1; i >= 0; i--) {
+    const quality = records[i].quality_level;
+    if (quality !== topQuality && quality !== midQuality) continue;
+    const prev = lastSeen.get(quality);
+    draws[i] = prev === undefined ? total - i : prev - i;
+    lastSeen.set(quality, i);
+  }
 
-  return records.map((record) => {
-    const idx = records.indexOf(record);
-    let draws: number | null = null;
-    if (record.quality_level === topQuality) {
-      const nextIdx = topMarks.findIndex((r) => records.indexOf(r) > idx);
-      draws = nextIdx === -1 ? records.length - idx : records.indexOf(topMarks[nextIdx]) - idx;
-    } else if (record.quality_level === midQuality) {
-      const nextIdx = midMarks.findIndex((r) => records.indexOf(r) > idx);
-      draws = nextIdx === -1 ? records.length - idx : records.indexOf(midMarks[nextIdx]) - idx;
-    }
-    return {
-      ...record,
-      draws,
-      offBanner: isOffBanner(record, commonItems, upPools),
-    };
-  });
+  return records.map((record, i) => ({
+    ...record,
+    draws: draws[i],
+    offBanner: isOffBanner(record, commonItems, upPools),
+  }));
 }

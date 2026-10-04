@@ -1,8 +1,13 @@
 const { ipcMain, clipboard } = require('electron');
 const {fetchGenshinGachaData} = require("./gachaAnalysisGenshin");
-require("./getGenshinUrl");
 const {db2} = require("../../../app/database");
 const db = db2;
+
+function queryAll(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
+    });
+}
 
 ipcMain.handle('fetchGenshinGachaData', async (event) => {
     event.sender.send('gacha-records-status', '正在获取抽卡记录...');
@@ -47,17 +52,15 @@ ipcMain.handle('get-genshin-player-uids', async () => {
 });
 
 
-ipcMain.handle('get-genshin-gacha-records', async () => {
+ipcMain.handle('get-genshin-gacha-records', async (event, uid) => {
     try {
-        const rows = await new Promise((resolve, reject) => {
-            db.all(
-                'SELECT * FROM genshin_gacha ORDER BY id DESC', // 按插入顺序倒序获取
-                (err, rows) => {
-                    if (err) return reject(err);
-                    resolve(rows);
-                }
-            );
-        });
+        // 只取当前 UID 的记录：表可达数万行，之前全表回传、渲染层再过滤
+        const rows = await queryAll(
+            uid
+                ? 'SELECT * FROM genshin_gacha WHERE uid = ? ORDER BY id DESC'
+                : 'SELECT * FROM genshin_gacha ORDER BY id DESC',
+            uid ? [uid] : [],
+        );
         // 定义gacha_type对应的中文映射
         const gachaTypeMap = {
             "100": "新手祈愿",

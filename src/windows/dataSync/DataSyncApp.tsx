@@ -12,10 +12,25 @@ export default function DataSyncApp() {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState<Status>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [hasSaved, setHasSaved] = useState(false);
   const busyTimer = useRef<number | null>(null);
 
+  // 回显已保存的配置：之前没有读取通道，每次打开窗口都得重新输入
   useEffect(() => {
-    const off = window.electronAPI.on('syncSettingsStatus', (next: Status) => {
+    void window.electronAPI
+      .loadSyncSettings()
+      .then((saved) => {
+        if (saved) {
+          setRepoUrl(saved.repoUrl);
+          setToken(saved.token);
+          setHasSaved(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const off = window.electronAPI.onSyncSettingsStatus((next) => {
       setStatus(next);
       setBusy(null);
     });
@@ -29,15 +44,16 @@ export default function DataSyncApp() {
     [],
   );
 
-  const run = (channel: string, id: string, payload?: unknown) => {
+  const run = (id: string, fn: () => void) => {
     setBusy(id);
     setStatus(null);
     busyTimer.current = window.setTimeout(() => setBusy(null), 60_000);
-    if (payload) window.electronAPI.send(channel, payload);
-    else window.electronAPI.send(channel);
+    fn();
   };
 
   const canSubmit = repoUrl.trim().length > 0 && token.trim().length > 0;
+  // 从云端覆盖：输入留空时主进程会回退到已保存的配置
+  const canDownload = canSubmit || hasSaved;
 
   return (
     <div className="flex h-full flex-col">
@@ -45,7 +61,7 @@ export default function DataSyncApp() {
         <h1 className="text-sm font-semibold">数据同步设置</h1>
         <button
           type="button"
-          onClick={() => window.electronAPI.send('closeDataSyncWindow')}
+          onClick={() => window.electronAPI.closeDataSyncWindow()}
           className="app-no-drag grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label="关闭"
         >
@@ -76,14 +92,18 @@ export default function DataSyncApp() {
             spellCheck={false}
           />
           <p className="text-xs text-muted-foreground">
-            令牌会以 AES-256-CBC 加密后保存在本地，仅用于读写你的数据仓库。
+            令牌会通过系统凭据加密（Windows DPAPI）保存在本地，仅用于读写你的数据仓库。
           </p>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
           <Button
             disabled={!canSubmit || busy !== null}
-            onClick={() => run('saveSyncSettings', 'save', { repoUrl: repoUrl.trim(), token: token.trim() })}
+            onClick={() =>
+              run('save', () =>
+                window.electronAPI.saveSyncSettings({ repoUrl: repoUrl.trim(), token: token.trim() }),
+              )
+            }
           >
             {busy === 'save' ? <Loader2 className="animate-spin" /> : <Save />}
             保存设置
@@ -91,7 +111,7 @@ export default function DataSyncApp() {
           <Button
             variant="secondary"
             disabled={busy !== null}
-            onClick={() => run('uploadFirstData', 'upload')}
+            onClick={() => run('upload', () => window.electronAPI.uploadFirstData())}
           >
             {busy === 'upload' ? <Loader2 className="animate-spin" /> : <CloudUpload />}
             上传数据
@@ -100,9 +120,13 @@ export default function DataSyncApp() {
 
         <Button
           variant="outline"
-          disabled={!canSubmit || busy !== null}
+          disabled={!canDownload || busy !== null}
           onClick={() =>
-            run('downloadLastedData', 'download', { repoUrl: repoUrl.trim(), token: token.trim() })
+            run('download', () =>
+              window.electronAPI.downloadLastedData(
+                canSubmit ? { repoUrl: repoUrl.trim(), token: token.trim() } : undefined,
+              ),
+            )
           }
         >
           {busy === 'download' ? <Loader2 className="animate-spin" /> : <CloudDownload />}
@@ -121,7 +145,7 @@ export default function DataSyncApp() {
         )}
 
         <p className="text-xs text-muted-foreground">
-          「从云端覆盖本地数据」会用云端版本替换本机的两个数据库文件，请先做好本地备份。
+          「从云端覆盖本地数据」会先自动备份本机数据库（数据文件夹下的 backup 目录），替换后自动重启应用。输入留空时使用已保存的同步设置。
         </p>
       </div>
     </div>

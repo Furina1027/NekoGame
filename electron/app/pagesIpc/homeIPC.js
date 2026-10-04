@@ -1,16 +1,6 @@
 const { ipcMain} = require('electron');
 const { getAnalysisData, refreshAnalysisData, generateAnalysisData } = require('../analysis');
-const path = require("path");
-const sqlite3 = require('sqlite3').verbose();
-const { getGameTimeData} = require('../database'); // 确保导入 getGameTimeData
-
-const db = new sqlite3.Database(path.join(process.env.NEKO_GAME_FOLDER_PATH, "neko_game.db"), (err) => {
-    if (err) {
-        console.error("Database connection failed:", err.message);
-    } else {
-        console.log("Connected to the database.");
-    }
-});
+const { getGameTimeData, db } = require('../database'); // 复用共享连接：自建第二个连接会绕过 closeDatabases，让数据替换时文件被锁
 
 // 监听获取分析数据请求
 ipcMain.handle('fetch-analysis-data', async (event, { type, range }) => {

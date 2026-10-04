@@ -81,8 +81,10 @@ ipcMain.handle("check-errors", async () => {
         let cacheChanges = 0;    // 记录缓存清理的条数
 
         db.serialize(() => {
-            // 清理 end_time 为 NULL 或 end_time 小于 start_time 的数据
-            db.run(`DELETE FROM game_sessions WHERE end_time IS NULL OR end_time < start_time`, [], function (err) {
+            // 清理 end_time < start_time 的脏数据。
+            // end_time IS NULL 是正在进行中的会话，绝不能删——
+            // 之前连它一起删，之后 tracker 的按 id 更新全部落空，这段时长就丢了
+            db.run(`DELETE FROM game_sessions WHERE end_time IS NOT NULL AND end_time < start_time`, [], function (err) {
                 if (err) {
                     reject("检查错误时发生问题：" + err.message);
                     return;
@@ -91,7 +93,8 @@ ipcMain.handle("check-errors", async () => {
                 if (changes1 > 0) {
                     resultMessage += `已整理 ${changes1} 条异常时间记录。\n`;
                 }
-                // 清理 start_time 等于 end_time 的数据
+                // 清理 start_time 等于 end_time 的数据（0 秒空记录）。
+                // 进行中的会话 end_time 为 NULL，与 start_time 比较为假，不受影响
                 db.run(`DELETE FROM game_sessions WHERE start_time = end_time`, [], function (err) {
                     if (err) {
                         reject("检查开始时间等于结束时间的记录时发生问题：" + err.message);

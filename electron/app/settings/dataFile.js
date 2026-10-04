@@ -33,6 +33,19 @@ function getDataPath() {
 // 初始化数据路径
 process.env.NEKO_GAME_FOLDER_PATH = getDataPath();
 
+/**
+ * 数据目录操作前的收口：停掉 tracker 并关闭数据库连接。
+ * 注意这里必须运行时 require：database.js 在模块顶层读取 NEKO_GAME_FOLDER_PATH
+ * 并打开连接，本文件（由 main.js 在 database 之前加载）负责先把它设好，
+ * 顶层 require 会形成循环、把 database 拉到环境变量赋值之前。
+ */
+async function quiesceDataWrites() {
+    const { stopGameTracking } = require('../gameTracker');
+    const { closeDatabases } = require('../database');
+    stopGameTracking();
+    await closeDatabases();
+}
+
 // 保存配置文件函数
 function savePathConfig({ currentPath, toDeletePath }) {
     const config = { currentPath, toDeletePath };
@@ -131,6 +144,10 @@ ipcMain.handle('browse-dataFile', async () => {
             // 确保目标路径存在
             fs.mkdirSync(newNekoGamePath, { recursive: true });
 
+            // 复制前必须停掉写入方并关闭连接：tracker 每 15 秒写一次库，
+            // 连接打开时复制 SQLite 文件，复制到一半极可能是不一致的坏库
+            await quiesceDataWrites();
+
             // 复制文件夹到新路径
             await copyNekoGameFolder(currentPath, newNekoGamePath);
 
@@ -144,6 +161,9 @@ ipcMain.handle('browse-dataFile', async () => {
             return { success: true, path: newNekoGamePath, message: '路径已更新，正在重启应用...' };
         } catch (error) {
             console.error(`路径切换失败: ${error.message}`);
+            dialog.showErrorBox('路径切换失败', `${error.message}\n应用将重启以恢复数据访问。`);
+            app.relaunch();
+            app.exit();
             return { success: false, message: `路径切换失败: ${error.message}` };
         }
     }
@@ -159,6 +179,9 @@ ipcMain.handle('reset-dataFile', async () => {
             // 确保默认路径存在
             fs.mkdirSync(defaultDataPath, { recursive: true });
 
+            // 与「更换数据路径」相同：先停写入方、关连接，再复制
+            await quiesceDataWrites();
+
             // 复制文件夹到默认路径
             await copyNekoGameFolder(currentPath, defaultDataPath);
 
@@ -171,7 +194,10 @@ ipcMain.handle('reset-dataFile', async () => {
 
             return { success: true, path: defaultDataPath, message: '已恢复默认路径，正在重启应用...' };
         } catch (error) {
-            console.error('恢复默认路径失败:', error.message);
+            console.error(`恢复默认路径失败: ${error.message}`);
+            dialog.showErrorBox('恢复默认路径失败', `${error.message}\n应用将重启以恢复数据访问。`);
+            app.relaunch();
+            app.exit();
             return { success: false, message: `恢复默认路径失败: ${error.message}` };
         }
     }

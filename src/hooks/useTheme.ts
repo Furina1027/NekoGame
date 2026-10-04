@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react';
-
 export interface ThemeColors {
   text: string;
   muted: string;
@@ -8,7 +6,13 @@ export interface ThemeColors {
   series: string[];
 }
 
-const DARK: ThemeColors = {
+/**
+ * 应用固定使用深色主题（index.html 硬编码 class="dark"，globals.css 里
+ * 遮罩/模糊等关键变量只定义了深色一套）。之前这里还保留了一套从未启用的
+ * 浅色配色和每组件实例一个的 MutationObserver——永远观察不到变化，纯开销。
+ * 现在只留深色值，引用恒定，依赖 colors 的 useMemo 也不会再失效。
+ */
+const current: ThemeColors = {
   text: 'oklch(0.97 0.004 275)',
   muted: 'oklch(0.74 0.015 275)',
   grid: 'oklch(1 0 0 / 0.08)',
@@ -24,50 +28,6 @@ const DARK: ThemeColors = {
   ],
 };
 
-const LIGHT: ThemeColors = {
-  text: 'oklch(0.21 0.015 275)',
-  muted: 'oklch(0.52 0.017 275)',
-  grid: 'oklch(0.21 0.015 275 / 0.1)',
-  series: [
-    'oklch(0.62 0.11 200)',
-    'oklch(0.68 0.13 340)',
-    'oklch(0.7 0.14 265)',
-    'oklch(0.76 0.15 85)',
-    'oklch(0.68 0.15 155)',
-    'oklch(0.7 0.16 300)',
-    'oklch(0.76 0.15 60)',
-    'oklch(0.68 0.12 200)',
-  ],
-};
-
-let current = DARK;
-const listeners = new Set<(c: ThemeColors) => void>();
-
 export function useTheme() {
-  const [colors, setColors] = useState(current);
-  const [isDark, setIsDark] = useState(true);
-
-  useEffect(() => {
-    listeners.add(setColors);
-    return () => {
-      listeners.delete(setColors);
-    };
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const apply = () => {
-      const dark = root.classList.contains('dark');
-      setIsDark(dark);
-      current = dark ? DARK : LIGHT;
-      listeners.forEach((fn) => fn(current));
-    };
-    apply();
-
-    const observer = new MutationObserver(apply);
-    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-
-  return { isDark, colors };
+  return { isDark: true, colors: current };
 }

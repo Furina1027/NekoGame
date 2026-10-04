@@ -1,10 +1,18 @@
 const {db} = require('../../app/database');
 const {ipcMain, dialog } = require('electron');
 
+// sqlite3 是回调 API，直接 await db.run() 拿不到结果也等不到错误，
+// 统一包一层 Promise（gachaDelete.js 的 dbRun 同款封装）
+function dbRun(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.run(sql, params, (err) => (err ? reject(err) : resolve()));
+    });
+}
+
 // 保存设置到数据库
 ipcMain.handle('saveBackgroundSettings', async (event, key, value) => {
     try {
-        await db.run(`
+        await dbRun(`
             INSERT INTO settings (key, value)
             VALUES (?, ?)
             ON CONFLICT(key) 
@@ -77,8 +85,8 @@ ipcMain.handle('restoreDefaultBackgroundSettings', async () => {
         const defaultOpacity = '0.5';  // 默认透明度
 
         // 更新数据库
-        await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['backgroundImage', defaultBackgroundImage]);
-        await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['backgroundOpacity', defaultOpacity]);
+        await dbRun('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['backgroundImage', defaultBackgroundImage]);
+        await dbRun('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['backgroundOpacity', defaultOpacity]);
 
         console.log('已恢复默认背景设置');
     } catch (error) {

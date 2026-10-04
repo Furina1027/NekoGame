@@ -33,7 +33,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     (kind: ToastKind, title: string, description?: string) => {
       const id = ++seq;
       setItems((prev) => [...prev.slice(-3), { id, kind, title, description }]);
-      const timer = window.setTimeout(() => dismiss(id), kind === 'error' ? 6000 : 3200);
+      // 句柄触发后从数组移除，长会话下不再只增不减
+      const timer = window.setTimeout(() => {
+        timers.current = timers.current.filter((t) => t !== timer);
+        dismiss(id);
+      }, kind === 'error' ? 6000 : 3200);
       timers.current.push(timer);
     },
     [dismiss],
@@ -62,7 +66,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {items.map((t) => (
           <div
             key={t.id}
-            role="status"
+            role={t.kind === 'error' ? 'alert' : 'status'}
             className={cn(
               'glass glass-sheen pointer-events-auto flex items-start gap-2.5 rounded-xl p-3 shadow-xl shadow-black/25',
               'animate-in slide-in-from-bottom-2 duration-300',

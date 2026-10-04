@@ -50,6 +50,8 @@ export type ChartProps = {
     options?: ChartOptions<K>;
     height?: number;
     className?: string;
+    /** 给读屏的图表描述：canvas 本身对辅助技术不可见 */
+    ariaLabel?: string;
     /**
      * 强制重播一次「从 0 长到实际值」的动画。
      * 刷新数据时重算结果常常与原值完全一致（时长只在会话结束时增加），
@@ -101,7 +103,7 @@ function toConfig(next: Applied) {
  * 实例只在挂载时创建一次（容器宽度为 0 时推迟到 ResizeObserver 报到尺寸再建），
  * 之后数据变化走 chart.update() 原地更新，不清空画布。
  */
-export function Chart({ type, data, options, height = 260, className, swapKey }: ChartProps) {
+export function Chart({ type, data, options, height = 260, className, ariaLabel, swapKey }: ChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartJS | null>(null);
@@ -191,7 +193,13 @@ export function Chart({ type, data, options, height = 260, className, swapKey }:
   }, [type, data, options, colors, swapKey]);
 
   return (
-    <div ref={wrapRef} className={className} style={{ height }}>
+    <div
+      ref={wrapRef}
+      className={className}
+      style={{ height }}
+      role={ariaLabel ? 'img' : undefined}
+      aria-label={ariaLabel}
+    >
       <canvas ref={canvasRef} />
     </div>
   );

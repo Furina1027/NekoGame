@@ -71,7 +71,11 @@ export function useBackground() {
         });
       })
       .catch(() => {});
-    return window.electronAPI.onBackgroundSettings((next) => apply(next));
+    const off = window.electronAPI.onBackgroundSettings((next) => apply(next));
+    return () => {
+      cancelled = true;
+      off();
+    };
   }, []);
 
   const fileUrl = (filePath: string | null) =>

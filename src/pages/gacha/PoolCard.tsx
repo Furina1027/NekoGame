@@ -26,22 +26,28 @@ interface PoolCardProps {
 
 export function PoolCard({ config, rule, records, commonItems }: PoolCardProps) {
   const isUpPool = config.upPools.includes(rule.name);
-  const emptyTop = `暂未抽出${rule.topName}`;
+  const emptyTop = `还没抽出${rule.topName}`;
 
-  const avgTop = calculateDrawsBetween(records, rule.top, `还没抽出${rule.topName}`);
-  const avgUp = isUpPool ? calculateUpAverage(records, commonItems, rule.top, config.upPools) : null;
-  const avgTopNumber = typeof avgTop === 'number' ? avgTop : null;
-  const avgUpNumber = typeof avgUp === 'number' ? avgUp : null;
+  // 统计函数都是 O(n) 起步的扫描，包进 useMemo：
+  // 刷新期间父组件每收到一次进度广播就重渲染一次，不能每次都全量重算
+  const stats = useMemo(() => {
+    const avgTop = calculateDrawsBetween(records, rule.top, `还没抽出${rule.topName}`);
+    const avgUp = isUpPool ? calculateUpAverage(records, commonItems, rule.top, config.upPools) : null;
+    const extreme = calculateMostDraws(records, rule.top, emptyTop);
+    return {
+      avgTop,
+      avgUp,
+      mostDraws: typeof extreme === 'string' ? null : extreme.maxDraws,
+      leastDraws: typeof extreme === 'string' ? null : extreme.minDraws,
+      pityTop: calculateLastDraws(records, rule.top),
+      pityMid: calculateLastDraws(records, rule.mid),
+      rating: getRating(avgTop, avgUp, rule.rating),
+      noDeviation: isUpPool ? calculateNoDeviationRate(records, commonItems, rule.top) : null,
+    };
+  }, [records, rule, commonItems, config.upPools, isUpPool, emptyTop]);
 
-  const extreme = calculateMostDraws(records, rule.top, emptyTop);
-  const mostDraws = typeof extreme === 'string' ? null : extreme.maxDraws;
-  const leastDraws = typeof extreme === 'string' ? null : extreme.minDraws;
-
-  const pityTop = calculateLastDraws(records, rule.top);
-  const pityMid = calculateLastDraws(records, rule.mid);
-
-  const rating = getRating(avgTop, avgUp, rule.rating);
-  const noDeviation = isUpPool ? calculateNoDeviationRate(records, commonItems, rule.top) : null;
+  const avgTopNumber = typeof stats.avgTop === 'number' ? stats.avgTop : null;
+  const avgUpNumber = typeof stats.avgUp === 'number' ? stats.avgUp : null;
 
   const starCounts = useMemo(
     () => ({
@@ -77,8 +83,8 @@ export function PoolCard({ config, rule, records, commonItems }: PoolCardProps) 
 
           <TabsContent value="stats" className="flex flex-col gap-4 pt-1">
             <div className="grid gap-3 sm:grid-cols-2">
-              <PityBar label={`距离上个${rule.topName}`} value={pityTop} max={rule.topPity} tone="top" />
-              <PityBar label={`距离上个${rule.midName}`} value={pityMid} max={rule.midPity} tone="mid" />
+              <PityBar label={`距离上个${rule.topName}`} value={stats.pityTop} max={rule.topPity} tone="top" />
+              <PityBar label={`距离上个${rule.midName}`} value={stats.pityMid} max={rule.midPity} tone="mid" />
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -88,8 +94,8 @@ export function PoolCard({ config, rule, records, commonItems }: PoolCardProps) 
                 value={isUpPool ? fmt(avgUpNumber, 2) : '—'}
                 muted={!isUpPool}
               />
-              <Stat label={config.statLabels.most} value={mostDraws === null ? '—' : String(mostDraws)} />
-              <Stat label={config.statLabels.least} value={leastDraws === null ? '—' : String(leastDraws)} />
+              <Stat label={config.statLabels.most} value={stats.mostDraws === null ? '—' : String(stats.mostDraws)} />
+              <Stat label={config.statLabels.least} value={stats.leastDraws === null ? '—' : String(stats.leastDraws)} />
             </div>
           </TabsContent>
 
@@ -99,13 +105,13 @@ export function PoolCard({ config, rule, records, commonItems }: PoolCardProps) 
                 <div>
                   <p className="text-xs text-muted-foreground">生涯评级</p>
                   <p className="text-lg font-semibold" style={{ color: config.accent }}>
-                    {rating}
+                    {stats.rating}
                   </p>
                 </div>
-                {noDeviation && (
+                {stats.noDeviation && (
                   <div>
                     <p className="text-xs text-muted-foreground">不歪概率</p>
-                    <p className="tabular-nums text-sm">{noDeviation}</p>
+                    <p className="tabular-nums text-sm">{stats.noDeviation}</p>
                   </div>
                 )}
                 <p className="text-[11px] text-muted-foreground">

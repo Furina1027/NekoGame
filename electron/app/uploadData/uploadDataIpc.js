@@ -1,10 +1,12 @@
-const { BrowserWindow, ipcMain, shell} = require('electron');
+const { BrowserWindow, ipcMain, shell, app } = require('electron');
 const { saveSyncConfigToFile, loadSyncConfigFromFile } = require('./syncSettings');
 const path = require("path");
-const {get, put} = require("axios");  // 引入获取设置的函数
 const fs = require('fs');
 const axios = require('axios');
 const crypto = require('crypto');
+const { closeDatabases } = require('../database');
+const { stopGameTracking } = require('../gameTracker');
+const { isTrustedSender } = require('../trustedSender');
 
 let dataSyncWindow = null;
 function createDataSyncWindow() {
@@ -17,7 +19,7 @@ function createDataSyncWindow() {
         minWidth: 460,
         minHeight: 420,
         resizable: true,
-        parent: mainWindow,
+        parent: global.mainWindow ?? null,
         modal: true,
         show: false,
         backgroundColor: '#16161c',
@@ -39,7 +41,7 @@ function createDataSyncWindow() {
         dataSyncWindow.show();
     });
     dataSyncWindow.webContents.setWindowOpenHandler(({ url }) => {
-        shell.openExternal(url);
+        if (isHttpUrl(url)) shell.openExternal(url);
         return { action: 'deny' };
     });
 
@@ -47,7 +49,7 @@ function createDataSyncWindow() {
     dataSyncWindow.webContents.on('will-navigate', (event, url) => {
         if (url !== dataSyncWindow.webContents.getURL()) {
             event.preventDefault(); // 阻止导航
-            shell.openExternal(url); // 在默认浏览器中打开链接
+            if (isHttpUrl(url)) shell.openExternal(url);
         }
     });
     // 关闭窗口时清理引用
@@ -56,6 +58,16 @@ function createDataSyncWindow() {
         dataSyncWindow = null;
     });
 }
+
+/** 只放行网页链接，file:/// 等协议在 Windows 上会被 ShellExecute 直接执行 */
+function isHttpUrl(url) {
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    } catch {
+        return false;
+    }
+}
 // 监听前端发送的 'openDataSyncWindow' 事件，创建数据同步窗口
 ipcMain.on('openDataSyncWindow', () => {
     createDataSyncWindow();
@@ -63,6 +75,7 @@ ipcMain.on('openDataSyncWindow', () => {
 
 // 监听前端发送的 'saveSyncSettings' 事件，保存同步设置
 ipcMain.on('saveSyncSettings', (event, { repoUrl, token }) => {
+    if (!isTrustedSender(event)) return;
     try {
         // 保存加密配置信息到文件
         saveSyncConfigToFile(repoUrl, token);
@@ -73,8 +86,9 @@ ipcMain.on('saveSyncSettings', (event, { repoUrl, token }) => {
     }
 });
 ipcMain.on('uploadFirstData', async (event) => {
+    if (!isTrustedSender(event)) return;
     try {
-        await initUpload();  // 确保上传过程是异步执行并等待完成
+        await initUpload({ allowRestart: false });  // 手动触发的上传不重启应用
         event.reply('syncSettingsStatus', { success: true, message: '数据上传成功' });
     } catch (error) {
         console.error('初始化数据失败:', error);
@@ -82,21 +96,111 @@ ipcMain.on('uploadFirstData', async (event) => {
     }
 });
 
-ipcMain.on('downloadLastedData', async (event, { repoUrl, token }) => {
+// 回显已保存的同步配置：没有这条通道，用户每次打开窗口都得重新输入仓库地址和令牌
+ipcMain.handle('load-sync-settings', (event) => {
+    if (!isTrustedSender(event)) return null;
+    const config = loadSyncConfigFromFile();
+    return config ? { repoUrl: config.decryptedRepoUrl, token: config.decryptedToken } : null;
+});
+
+ipcMain.on('downloadLastedData', async (event, { repoUrl, token } = {}) => {
+    if (!isTrustedSender(event)) return;
     try {
-        const neko_gameFilePath = path.join(process.env.NEKO_GAME_FOLDER_PATH, 'neko_game.db');
-        const gacha_dataFilePath = path.join(process.env.NEKO_GAME_FOLDER_PATH, 'gacha_data.db');
+        // 输入留空时回退到已保存的配置
+        const saved = loadSyncConfigFromFile();
+        const effectiveRepoUrl = repoUrl || saved?.decryptedRepoUrl;
+        const effectiveToken = token || saved?.decryptedToken;
+        if (!effectiveRepoUrl || !effectiveToken) {
+            throw new Error('请先填写仓库地址和访问令牌，或先保存过同步设置');
+        }
 
-        await downloadFileFromRepo(repoUrl, token, 'neko_game.db', neko_gameFilePath);
-        await downloadFileFromRepo(repoUrl, token, 'gacha_data.db', gacha_dataFilePath);
+        await restoreDatabasesFromRepo(effectiveRepoUrl, effectiveToken);
 
-        event.reply('syncSettingsStatus', { success: true, message: '数据下载成功' });
+        event.reply('syncSettingsStatus', { success: true, message: '云端数据已下载，正在重启应用以完成替换...' });
     } catch (error) {
         console.error('下载失败:', error);
         event.reply('syncSettingsStatus', { success: false, message: `下载失败: ${error.message}` });
     }
 });
 
+/**
+ * 从仓库拉取两个数据库文件到临时文件，全部成功后
+ * 停止追踪 → 关闭数据库连接 → 原子替换 → 重启应用。
+ * 之前的实现直接 writeFileSync 覆盖「正被打开」的 SQLite 文件，
+ * 页缓存和文件句柄都还挂着，几乎必然把库写坏。
+ */
+async function restoreDatabasesFromRepo(repoUrl, token) {
+    const dataDir = process.env.NEKO_GAME_FOLDER_PATH;
+    const files = [
+        { fileName: 'neko_game.db', localPath: path.join(dataDir, 'neko_game.db') },
+        { fileName: 'gacha_data.db', localPath: path.join(dataDir, 'gacha_data.db') },
+    ];
+
+    // 先把两个文件都完整拉到临时路径，任何一个失败都不碰本地数据
+    const tmpFiles = [];
+    try {
+        for (const { fileName, localPath } of files) {
+            const blob = await fetchFileFromRepo(repoUrl, token, fileName);
+            const tmpPath = `${localPath}.downloading`;
+            fs.writeFileSync(tmpPath, blob);
+            tmpFiles.push({ tmpPath, localPath, fileName });
+        }
+    } catch (error) {
+        for (const { tmpPath } of tmpFiles) {
+            try { fs.rmSync(tmpPath, { force: true }); } catch { /* 尽力清理 */ }
+        }
+        throw error;
+    }
+
+    // 备份当前文件（restoreDatabasesFromRepo 失败时还能从备份找回）
+    for (const { localPath, fileName } of tmpFiles) {
+        if (fs.existsSync(localPath)) await backupFile(localPath, fileName);
+    }
+
+    eventSafeNotify(true, '云端数据校验完成，正在重启应用以替换本地数据库...');
+
+    // 给窗口一点时间把提示显示出来，再执行不可逆的替换
+    setTimeout(async () => {
+        stopGameTracking();
+        await closeDatabases();
+
+        const leftovers = [];
+        try {
+            for (const { tmpPath, localPath } of tmpFiles) {
+                // 先把旧文件挪走再换上新文件：替换中途出错可以整体回滚
+                const backupPath = `${localPath}.replacing`;
+                if (fs.existsSync(localPath)) {
+                    fs.renameSync(localPath, backupPath);
+                    leftovers.push(backupPath);
+                }
+                fs.renameSync(tmpPath, localPath);
+            }
+        } catch (error) {
+            console.error('替换数据库失败，尝试回滚:', error);
+            for (const { localPath } of tmpFiles) {
+                try { fs.rmSync(localPath, { force: true }); } catch { /* 忽略 */ }
+            }
+            for (const backupPath of leftovers) {
+                try { fs.renameSync(backupPath, backupPath.replace(/\.replacing$/, '')); } catch { /* 忽略 */ }
+            }
+            eventSafeNotify(false, `替换数据库失败: ${error.message}`);
+            setTimeout(() => app.relaunch() || app.exit(1), 2000);
+            return;
+        }
+
+        // 替换成功，清掉挪走的旧文件
+        for (const backupPath of leftovers) {
+            try { fs.rmSync(backupPath, { force: true }); } catch { /* 忽略 */ }
+        }
+        app.relaunch();
+        app.exit(0);
+    }, 1500);
+}
+
+function eventSafeNotify(success, message) {
+    console.log(`[sync] ${message}`);
+    global.Notify(success, message);
+}
 
 // 监听关闭数据同步窗口的事件
 ipcMain.on('closeDataSyncWindow', () => {
@@ -298,8 +402,8 @@ async function uploadFileToRepo(repoUrl, token, filePath, fileName) {
 
 
 const {backupFile} = require("./backupData");
-// 从仓库下载文件
-async function downloadFileFromRepo(repoUrl, token, fileName, localPath) {
+// 从仓库下载文件，返回二进制内容（不落盘，由调用方决定写到哪里）
+async function fetchFileFromRepo(repoUrl, token, fileName) {
     const { owner, repo, platform } = parseRepoUrl(repoUrl);
     let apiUrl;
 
@@ -312,11 +416,6 @@ async function downloadFileFromRepo(repoUrl, token, fileName, localPath) {
     }
 
     try {
-        // 备份当前文件
-        if (fs.existsSync(localPath)) {
-            await backupFile(localPath, fileName);
-        }
-
         const headers = platform === 'github' ? { Authorization: `Bearer ${token}` } : {};
         const params  = platform === 'gitee'  ? { access_token: token } : {};
 
@@ -326,18 +425,16 @@ async function downloadFileFromRepo(repoUrl, token, fileName, localPath) {
         if (platform === 'github' && meta.data?.download_url) {
             // 优先使用 download_url 直下二进制
             const bin = await axios.get(meta.data.download_url, { responseType: 'arraybuffer', headers });
-            fs.writeFileSync(localPath, Buffer.from(bin.data));
-        } else if (meta.data?.content) {
-            // 回退到 content base64
-            const fileContent = Buffer.from(meta.data.content, 'base64');
-            fs.writeFileSync(localPath, fileContent);
-        } else {
-            throw new Error('无法从 API 获取文件内容（content 为空且无 download_url）');
+            return Buffer.from(bin.data);
         }
-
-        console.log('文件下载成功:', fileName);
+        if (meta.data?.content) {
+            // 回退到 content base64
+            return Buffer.from(meta.data.content, 'base64');
+        }
+        throw new Error('无法从 API 获取文件内容（content 为空且无 download_url）');
     } catch (error) {
-        global.Notify(false, `${fileName}下载失败\n平台:${platform}\n${error.response ? error.response.data.message : error.message}`);
+        const detail = error.response ? error.response.data?.message || error.message : error.message;
+        eventSafeNotify(false, `${fileName}下载失败\n平台:${platform}\n${detail}`);
         console.error('数据下载失败:', error);
         throw error;
     }
@@ -351,56 +448,91 @@ function calculateFileHash(filePath) {
   return hash.digest('hex');  // 返回文件的 hash 值
 }
 
-// 数据同步代码
-async function autoUploadOrDownload(repoUrl, token, localFilePath, fileName) {
-    const { owner, repo, platform } = parseRepoUrl(repoUrl);
+// 数据同步代码：判断单个文件应该上传、下载还是跳过
+async function planFileSync(repoUrl, token, localFilePath, fileName) {
     const localFileTimestamp = getFileTimestamp(localFilePath);
     if (localFileTimestamp === null) {
         console.log('本地文件不存在或无法读取，跳过同步逻辑。');
-        return;
+        return 'skip';
     }
-    const giteeFileTimestamp = await getFileTimestampFromRepo(repoUrl, token, fileName);
-    if (giteeFileTimestamp === null) {
-        // 如果 Gitee 或者 Github 上文件不存在，上传本地文件
-        console.log(platform, fileName, '文件不存在，上传本地文件...');
-        await uploadFileToRepo(repoUrl, token, localFilePath, fileName);
-    } else {
-        console.log('localFileTimestamp,giteeFileTimestamp', localFileTimestamp,giteeFileTimestamp);
-        // 定义时间范围
-        const TIME_TOLERANCE = 6000000; // 10小时
-        const timeDiff = Math.abs(localFileTimestamp - giteeFileTimestamp);
-        if (timeDiff <= TIME_TOLERANCE) {
-            console.log('本地文件和仓库中文件时间差异较小，无需同步');
-        } else {
-            // 如果 Gitee 上文件更新，比较时间戳
-            if (localFileTimestamp > giteeFileTimestamp) {
-                // 如果本地文件更新，上传本地文件
-                console.log('本地', fileName, '文件较新，准备上传...');
-                await uploadFileToRepo(repoUrl, token, localFilePath, fileName);
-            } else if (localFileTimestamp < giteeFileTimestamp) {
-                // 如果 仓库 文件更新，下载 仓库的 文件
-                console.log(platform, fileName, '文件较新，准备下载...');
-                await downloadFileFromRepo(repoUrl, token, fileName, localFilePath);
-            }
+    const remoteFileTimestamp = await getFileTimestampFromRepo(repoUrl, token, fileName);
+    if (remoteFileTimestamp === null) {
+        // 仓库里没有这个文件，上传本地文件
+        console.log(fileName, '在仓库中不存在，上传本地文件...');
+        return 'upload';
+    }
+    // 时间容差。上传后本地 mtime 与远端 commit 时间天然有先后差，
+    // 容差太小会把「自己刚上传的」再下载/上传一遍
+    const TIME_TOLERANCE = 6000000; // 100 分钟
+    const timeDiff = Math.abs(localFileTimestamp - remoteFileTimestamp);
+    if (timeDiff <= TIME_TOLERANCE) {
+        console.log(fileName, '本地文件和仓库中文件时间差异较小，无需同步');
+        return 'skip';
+    }
+    return localFileTimestamp > remoteFileTimestamp ? 'upload' : 'download';
+}
+
+/**
+ * 一次开机只允许因「云端较新」自动重启一次。
+ * 下载会刷新本地 mtime，重启后再同步会走上传分支，正常不会成环；
+ * 这个标记兜底网络/时钟异常导致的循环重启。
+ */
+const SYNC_RESTART_MARKER = () => path.join(process.env.NEKO_GAME_FOLDER_PATH, '.sync-restarted');
+const SYNC_RESTART_COOLDOWN = 10 * 60 * 1000;
+
+function syncRestartOnCooldown() {
+    const marker = SYNC_RESTART_MARKER();
+    try {
+        if (fs.existsSync(marker) && Date.now() - fs.statSync(marker).mtimeMs < SYNC_RESTART_COOLDOWN) {
+            return true;
         }
-    }
+        fs.writeFileSync(marker, String(Date.now()));
+    } catch { /* 标记写不进去就放行，替换本身仍受事务回滚保护 */ }
+    return false;
 }
 
 // 初始化上传下载
-async function initUpload() {
+async function initUpload({ allowRestart = true } = {}) {
     const config = loadSyncConfigFromFile();
-    if (config) {
-        const { decryptedRepoUrl, decryptedToken } = config;
-        const neko_gameFilePath  = path.join(process.env.NEKO_GAME_FOLDER_PATH, 'neko_game.db');
-        const gacha_dataFilePath = path.join(process.env.NEKO_GAME_FOLDER_PATH, 'gacha_data.db');
-        // 自动执行上传或下载操作（等待完成，避免前端过早提示成功）
-        console.log('准备同步neko_game.db');
-        await autoUploadOrDownload(decryptedRepoUrl, decryptedToken, neko_gameFilePath, 'neko_game.db');
-        console.log('准备同步gacha_data.db');
-        await autoUploadOrDownload(decryptedRepoUrl, decryptedToken, gacha_dataFilePath, 'gacha_data.db');
+    if (!config) return;
+
+    const { decryptedRepoUrl: repoUrl, decryptedToken: token } = config;
+    const dataDir = process.env.NEKO_GAME_FOLDER_PATH;
+    const files = [
+        { fileName: 'neko_game.db', localPath: path.join(dataDir, 'neko_game.db') },
+        { fileName: 'gacha_data.db', localPath: path.join(dataDir, 'gacha_data.db') },
+    ];
+
+    // 先对两个文件都判定方向，再统一执行：避免一半上传一半下载时序交错
+    const plans = [];
+    for (const file of files) {
+        const action = await planFileSync(repoUrl, token, file.localPath, file.fileName);
+        if (action !== 'skip') plans.push({ ...file, action });
+    }
+
+    const downloads = plans.filter((p) => p.action === 'download');
+    const uploads = plans.filter((p) => p.action === 'upload');
+
+    if (downloads.length > 0) {
+        // 云端较新：下载到临时文件后整体替换并重启，绝不覆写打开中的 SQLite
+        if (!allowRestart) {
+            eventSafeNotify(false, '云端数据较新，已跳过自动下载。\n请使用「从云端覆盖本地数据」手动恢复。');
+            for (const p of uploads) {
+                await uploadFileToRepo(repoUrl, token, p.localPath, p.fileName);
+            }
+            return;
+        }
+        if (syncRestartOnCooldown()) {
+            eventSafeNotify(false, '检测到云端数据较新，但刚刚已同步重启过一次，本次跳过。\n可稍后手动使用「从云端覆盖本地数据」。');
+            return;
+        }
+        await restoreDatabasesFromRepo(repoUrl, token);
+        return;
+    }
+
+    for (const p of uploads) {
+        await uploadFileToRepo(repoUrl, token, p.localPath, p.fileName);
     }
 }
 
-
-
-initUpload();
+module.exports = { initUpload };

@@ -103,9 +103,16 @@ export default function SettingsPage() {
   }, []);
 
   const toggle = async (key: string, value: boolean) => {
-    setGeneral((prev) => ({ ...prev, [key]: String(value) }));
-    await window.electronAPI.invoke('save-setting', key, String(value));
-    if (key === 'autoLaunch') await window.electronAPI.setAutoLaunch(value);
+    const prev = general[key];
+    setGeneral((p) => ({ ...p, [key]: String(value) }));
+    try {
+      await window.electronAPI.invoke('save-setting', key, String(value));
+      if (key === 'autoLaunch') await window.electronAPI.setAutoLaunch(value);
+    } catch (err) {
+      // 写盘失败时回滚界面，别让开关显示的状态和实际持久化的不一致
+      setGeneral((p) => ({ ...p, [key]: prev ?? 'false' }));
+      toast.error('保存设置失败', err instanceof Error ? err.message : String(err));
+    }
   };
 
   const run = async (id: string, fn: () => Promise<unknown>, success: string) => {
@@ -230,6 +237,7 @@ export default function SettingsPage() {
                 step={0.01}
                 value={settings.backgroundOpacity}
                 onChange={(e) => void update({ backgroundOpacity: Number(e.target.value) })}
+                aria-valuetext={`${Math.round(settings.backgroundOpacity * 100)}%`}
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted outline-none [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
               />
               <p className="text-xs text-muted-foreground">
@@ -357,6 +365,8 @@ export default function SettingsPage() {
                     } else {
                       toast.error('获取失败', res.message);
                     }
+                  } catch (err) {
+                    toast.error('获取失败', err instanceof Error ? err.message : String(err));
                   } finally {
                     setBusy(null);
                   }
@@ -383,6 +393,8 @@ export default function SettingsPage() {
                     } else {
                       toast.error('获取失败', res.message);
                     }
+                  } catch (err) {
+                    toast.error('获取失败', err instanceof Error ? err.message : String(err));
                   } finally {
                     setBusy(null);
                   }
@@ -547,72 +559,94 @@ function MhyQrDialog({
   const [qr, setQr] = useState('');
   const [status, setStatus] = useState('正在生成二维码…');
   const timer = useRef<number | null>(null);
+  /** 轮询轮次号：对话框关闭 / 二维码过期重开时递增，
+   *  让还在途的 await 之后的所有续作（包括重新排上的 interval）全部失效。
+   *  之前只靠 clearInterval，关窗发生在 await 期间时会漏掉随后建立的定时器。 */
+  const runId = useRef(0);
 
   const stop = useCallback(() => {
+    runId.current += 1;
     if (timer.current) {
       clearInterval(timer.current);
       timer.current = null;
     }
   }, []);
 
-  const start = useCallback(async () => {
-    setStatus('正在生成二维码…');
-    const created = (await window.electronAPI.invoke('mhy-login-create-qr')) as {
-      success: boolean;
-      message?: string;
-      ticket: string;
-      qrDataUrl: string;
-    };
-    if (!created.success) {
-      setStatus(`创建二维码失败：${created.message}`);
-      return;
-    }
-    setQr(created.qrDataUrl);
-    setStatus('等待扫码…');
-
-    let expiredOnce = false;
-    const poll = async () => {
-      try {
-        const r = (await window.electronAPI.invoke('mhy-login-poll', created.ticket)) as {
-          success: boolean;
-          status?: string;
-          message?: string;
-          expired?: boolean;
-          nickname?: string;
-          accountId?: string;
-        };
-        if (!r.success) {
-          if (r.expired && !expiredOnce) {
-            expiredOnce = true;
-            stop();
-            await start();
+  const start = useCallback(
+    async (onOpenChange: (v: boolean) => void, onSuccess: () => void) => {
+      const current = ++runId.current;
+      const isCurrent = () => current === runId.current;
+      const poll = async (ticket: string) => {
+        try {
+          const r = (await window.electronAPI.invoke('mhy-login-poll', ticket)) as {
+            success: boolean;
+            status?: string;
+            message?: string;
+            expired?: boolean;
+            nickname?: string;
+            accountId?: string;
+          };
+          if (!isCurrent()) return;
+          if (!r.success) {
+            if (r.expired) {
+              await start(onOpenChange, onSuccess);
+              return;
+            }
+            setStatus(`查询失败：${r.message}`);
             return;
           }
-          setStatus(`查询失败：${r.message}`);
+          if (r.status === 'Scanned') setStatus('已扫码，请在手机上确认…');
+          if (r.status === 'Confirmed') {
+            stop();
+            toast.success(`登录成功：${r.nickname || r.accountId}`);
+            onOpenChange(false);
+            onSuccess();
+          }
+        } catch (err) {
+          if (isCurrent()) setStatus(`轮询异常：${err instanceof Error ? err.message : String(err)}`);
+        }
+      };
+
+      try {
+        const created = (await window.electronAPI.invoke('mhy-login-create-qr')) as {
+          success: boolean;
+          message?: string;
+          ticket: string;
+          qrDataUrl: string;
+        };
+        if (!isCurrent()) return;
+        if (!created.success) {
+          setStatus(`创建二维码失败：${created.message}`);
           return;
         }
-        if (r.status === 'Scanned') setStatus('已扫码，请在手机上确认…');
-        if (r.status === 'Confirmed') {
-          stop();
-          toast.success(`登录成功：${r.nickname || r.accountId}`);
-          onOpenChange(false);
-          onSuccess();
+        setQr(created.qrDataUrl);
+        setStatus('等待扫码…');
+        // 二维码过期重开时上一轮的 interval 还挂着（内容已失效），先清掉再排新的
+        if (timer.current) {
+          clearInterval(timer.current);
+          timer.current = null;
         }
+        timer.current = window.setInterval(() => void poll(created.ticket), 1500);
+        void poll(created.ticket);
       } catch (err) {
-        setStatus(`轮询异常：${err instanceof Error ? err.message : String(err)}`);
+        if (isCurrent()) {
+          setStatus(`创建二维码失败：${err instanceof Error ? err.message : String(err)}`);
+        }
       }
-    };
-    timer.current = window.setInterval(poll, 1500);
-    void poll();
-  }, [onOpenChange, onSuccess, stop, toast]);
+    },
+    [stop, toast],
+  );
 
   useEffect(() => {
-    if (open) void start();
-    else {
-      stop();
+    if (open) {
       setQr('');
+      void start(onOpenChange, onSuccess);
+    } else {
+      stop();
     }
     return stop;
+    // start 内部已通过 runId 保证旧轮次失效，这里依赖 open 变化即可
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, start, stop]);
 
   return (

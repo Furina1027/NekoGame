@@ -20,8 +20,19 @@ function getAnalysisData(type, range, callback = () => {}) {
             if (err) {
                 callback(err, null);
             } else if (row && row.data) {
-                callback(null, JSON.parse(row.data), row.updated_at);
-            } else {
+                let parsed;
+                try {
+                    parsed = JSON.parse(row.data);
+                } catch {
+                    // 缓存损坏（例如同步覆盖了半个库文件）：删掉重建，而不是让异常带走主进程
+                    console.error(`分析缓存损坏，已重建: ${type}`);
+                    db.run(`DELETE FROM analysis_cache WHERE analysis_type = ? AND date = ?`, [type, today]);
+                    row = null;
+                }
+                if (parsed !== undefined) {
+                    callback(null, parsed, row.updated_at);
+                    return;
+                }
                 generateAnalysisData(type, range, (genErr, data) => {
                     if (genErr) {
                         callback(genErr, null);

@@ -1,15 +1,15 @@
-const { exec,spawn } = require('child_process');
+const { spawn } = require('child_process');
 const { startSession, endSession, db } = require('./database');
 const { ipcMain } = require('electron');
 const dayjs = require('dayjs');
 const timezone = require('dayjs/plugin/timezone');
 const utc = require('dayjs/plugin/utc');
-const ps = require('ps-node');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const trackedGames = {}; // 记录当前正在追踪的游戏状态
 const chinaTimezone = 'Asia/Shanghai';
+let trackingTimer = null;
 
 // 初始化游戏列表，将游戏进程名添加到 `trackedGames` 对象中
 function initializeTrackedGames() {
@@ -82,21 +82,27 @@ function detectRunningGames() {
                             } else {
                                 console.log(`Started session for ${processName}`);
                                 game.sessionId = sessionId;
+                                game.lastTickAt = Date.now();
                                 sendRunningStatus();
                             }
                         });
                     } else if (isRunning && game.isRunning && game.sessionId) {
                         const endTime = dayjs().tz(chinaTimezone).format('YYYY-MM-DD HH:mm:ss');
-                        const increment = 15;
 
+                        // 进行中的会话 end_time 为空，tick 负责每 15 秒推进一次
                         db.run(`
                             UPDATE game_sessions 
                             SET end_time = ?, duration = strftime('%s', ?) - strftime('%s', start_time)
-                            WHERE id = ? AND datetime(end_time) >= datetime(start_time) 
+                            WHERE id = ? AND end_time IS NULL
                         `, [endTime, endTime, game.sessionId], (err) => {
                             if (err) console.error("Error updating session duration:", err);
                         });
 
+                        // total_time 按真实时间差累加：tasklist 偶发变慢时
+                        // 固定 +15 会让它和 game_sessions.duration 永久漂移
+                        const now = Date.now();
+                        const increment = Math.max(0, Math.round((now - (game.lastTickAt ?? now)) / 1000));
+                        game.lastTickAt = now;
                         game.totalTime += increment;
                         db.run(`UPDATE games SET total_time = ? WHERE id = ?`, [game.totalTime, game.id], (err) => {
                             if (err) console.error("Error updating total time:", err);
@@ -104,26 +110,16 @@ function detectRunningGames() {
                         sendRunningStatus();
                     } else if (!isRunning && game.isRunning && game.sessionId) {
                         game.isRunning = false;
-                        db.get(`SELECT start_time, end_time FROM game_sessions WHERE id = ?`, [game.sessionId], (err, session) => {
+                        // 收尾会话：绝大多数已被 tick 推进过（endSession 只补漏，
+                        // 不会覆盖已有 end_time），游戏秒退时由它补上真实的短会话
+                        endSession(game.id, (err) => {
                             if (err) {
-                                console.error("Error fetching session:", err);
-                                return;
-                            }
-                            if (!session || session.end_time === null) {
-                                db.run(`DELETE FROM game_sessions WHERE id = ?`, [game.sessionId], (err) => {
-                                    if (err) console.error("Error deleting invalid session:", err);
-                                });
+                                console.error("Error ending session:", err);
                             } else {
-                                endSession(game.id, (err) => {
-                                    if (err) {
-                                        console.error("Error ending session:", err);
-                                    } else {
-                                        console.log(`Ended session for ${processName}`);
-                                        game.sessionId = null;
-                                        sendRunningStatus();
-                                    }
-                                });
+                                console.log(`Ended session for ${processName}`);
                             }
+                            game.sessionId = null;
+                            sendRunningStatus();
                         });
                     }
                 });
@@ -158,11 +154,20 @@ function sendRunningStatus() {
 // 启动检测循环，每15秒检测一次
 function startGameTracking() {
     initializeTrackedGames();
-    setInterval(() => detectRunningGames(), 15000);
+    trackingTimer = setInterval(() => detectRunningGames(), 15000);
+}
+
+// 停止检测循环。替换数据库文件前必须先停：tick 仍会尝试写已关闭的库
+function stopGameTracking() {
+    if (trackingTimer) {
+        clearInterval(trackingTimer);
+        trackingTimer = null;
+    }
 }
 
 module.exports = {
     startGameTracking,
+    stopGameTracking,
     initializeTrackedGames,
     sendRunningStatus
 };

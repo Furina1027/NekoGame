@@ -131,6 +131,7 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         'rounded-md px-3 py-1 font-medium transition-colors',
         active ? 'bg-surface-raised text-foreground' : 'text-muted-foreground hover:text-foreground',

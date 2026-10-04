@@ -1,24 +1,50 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
+const { safeStorage } = require('electron');
 
-// 生成随机的 32 字节密钥
-function generateSecretKey() {
-    return crypto.randomBytes(32);
+const keyDir = () => path.join(process.env.NEKO_GAME_FOLDER_PATH, 'key');
+const configFilePath = () => path.join(keyDir(), 'neko_config.neko');
+const legacyKeyFilePath = () => path.join(keyDir(), 'secret_key.neko');
+
+/**
+ * 同步凭据（仓库地址 + token）以前用 AES-256-CBC 自行加密，
+ * 但密钥文件和密文存在同一目录，加密等于没加密。
+ * 现在统一走 safeStorage（Windows 上是 DPAPI），密钥由系统按用户保管。
+ */
+
+function encrypt(text) {
+    if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error('系统不支持凭据加密（safeStorage 不可用），无法保存同步配置');
+    }
+    return safeStorage.encryptString(text).toString('base64');
 }
 
-// 加密函数
-function encrypt(text, secretKey) {
-    const IV = crypto.randomBytes(16);  // 随机生成初始化向量
-    const cipher = crypto.createCipheriv('aes-256-cbc', secretKey, IV);
-    let encrypted = cipher.update(text, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    return { encryptedText: encrypted, iv: IV.toString('hex') };
+function decrypt(base64) {
+    return safeStorage.decryptString(Buffer.from(base64, 'base64'));
 }
 
-// 解密函数
-function decrypt(encryptedText, secretKey, iv) {
+function saveSyncConfigToFile(repoUrl, token) {
+    const payload = encrypt(JSON.stringify({ repoUrl, token }));
+
+    fs.mkdirSync(keyDir(), { recursive: true });
+    fs.writeFileSync(configFilePath(), payload, 'utf8');
+
+    // 旧格式的密钥文件在新格式下没有用了
+    if (fs.existsSync(legacyKeyFilePath())) {
+        try {
+            fs.rmSync(legacyKeyFilePath(), { force: true });
+        } catch (err) {
+            console.error('清理旧密钥文件失败:', err.message);
+        }
+    }
+
+    console.log('同步配置已保存（safeStorage 加密）');
+}
+
+/* ---- 旧版 AES-256-CBC，仅用于把历史配置无损迁移到 safeStorage ---- */
+
+function legacyDecrypt(encryptedText, secretKey, iv) {
     const ivBuffer = Buffer.from(iv, 'hex');
     const decipher = crypto.createDecipheriv('aes-256-cbc', secretKey, ivBuffer);
     let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
@@ -26,62 +52,49 @@ function decrypt(encryptedText, secretKey, iv) {
     return decrypted;
 }
 
-// 存储加密信息到本地并保存加密密码
-function saveSyncConfigToFile(repoUrl, token) {
-    const secretKey = generateSecretKey();
-
-    // 加密 repoUrl 和 token
-    const { encryptedText: encryptedRepoUrl, iv: repoUrlIV } = encrypt(repoUrl, secretKey);
-    const { encryptedText: encryptedToken, iv: tokenIV } = encrypt(token, secretKey);
-
-    // 存储加密的配置和密钥
-    const config = {
-        encryptedRepoUrl,
-        encryptedToken,
-        repoUrlIV,
-        tokenIV
+function loadLegacyConfig(configData) {
+    const config = JSON.parse(configData);
+    if (!config.encryptedRepoUrl || !fs.existsSync(legacyKeyFilePath())) return null;
+    const secretKey = Buffer.from(fs.readFileSync(legacyKeyFilePath(), 'utf8'), 'hex');
+    return {
+        repoUrl: legacyDecrypt(config.encryptedRepoUrl, secretKey, config.repoUrlIV),
+        token: legacyDecrypt(config.encryptedToken, secretKey, config.tokenIV),
     };
-
-    const keyDirectory = path.join(process.env.NEKO_GAME_FOLDER_PATH, 'key');
-    if (!fs.existsSync(keyDirectory)) {
-        fs.mkdirSync(keyDirectory);
-    }
-
-    const configFilePath = `${process.env.NEKO_GAME_FOLDER_PATH}/key/neko_config.neko`;
-    const secretKeyFilePath = `${process.env.NEKO_GAME_FOLDER_PATH}/key/secret_key.neko`;
-
-    // 保存配置信息（repoUrl 和 token）
-    fs.writeFileSync(configFilePath, JSON.stringify(config));
-
-    // 保存生成的 secretKey（不再使用 master-password）
-    fs.writeFileSync(secretKeyFilePath, secretKey.toString('hex'));
-
-    console.log('配置和加密密码已保存');
 }
 
-// 从本地读取并解密配置和加密密码
+// 从本地读取并解密配置
 function loadSyncConfigFromFile() {
-    const configFilePath = `${process.env.NEKO_GAME_FOLDER_PATH}/key/neko_config.neko`;
-    const secretKeyFilePath = `${process.env.NEKO_GAME_FOLDER_PATH}/key/secret_key.neko`;
+    const file = configFilePath();
+    if (!fs.existsSync(file)) {
+        console.error('同步配置文件不存在');
+        return null;
+    }
 
-    if (fs.existsSync(configFilePath) && fs.existsSync(secretKeyFilePath)) {
-        const configData = fs.readFileSync(configFilePath, 'utf8');
-        const config = JSON.parse(configData);
+    try {
+        const raw = fs.readFileSync(file, 'utf8').trim();
 
-        const secretKeyHex = fs.readFileSync(secretKeyFilePath, 'utf8');
-        const secretKey = Buffer.from(secretKeyHex, 'hex');
+        if (raw.startsWith('{')) {
+            // 旧格式：读出明文后立刻用 safeStorage 重新保存，完成迁移
+            const creds = loadLegacyConfig(raw);
+            if (!creds) {
+                console.error('旧版同步配置缺少密钥文件，无法读取');
+                return null;
+            }
+            try {
+                saveSyncConfigToFile(creds.repoUrl, creds.token);
+                console.log('同步配置已从旧版加密迁移到 safeStorage');
+            } catch (err) {
+                console.error('迁移同步配置失败（本次仍使用旧数据）:', err.message);
+            }
+            return { decryptedRepoUrl: creds.repoUrl, decryptedToken: creds.token };
+        }
 
-        // 解密 repoUrl 和 token
-        const decryptedRepoUrl = decrypt(config.encryptedRepoUrl, secretKey, config.repoUrlIV);
-        const decryptedToken = decrypt(config.encryptedToken, secretKey, config.tokenIV);
-
-        console.log('配置和加密密码已加载');
-
-        return { decryptedRepoUrl, decryptedToken, secretKey };
-    } else {
-        console.error('配置文件或加密密码文件不存在');
+        const { repoUrl, token } = JSON.parse(decrypt(raw));
+        return { decryptedRepoUrl: repoUrl, decryptedToken: token };
+    } catch (err) {
+        console.error('读取同步配置失败:', err.message);
         return null;
     }
 }
 
-module.exports = {saveSyncConfigToFile, loadSyncConfigFromFile} ;
+module.exports = { saveSyncConfigToFile, loadSyncConfigFromFile };

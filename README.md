@@ -25,7 +25,7 @@ Neko Game 是一款抽卡分析与游戏管理程序，用于记录、分析并�
 
 ### 界面层整体重写
 
-渲染进程由原生 DOM + jQuery 迁移为 **React 19 + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui**，主进程仍保持 CommonJS 架构。旧版界面保留在 `legacy/` 目录，仅作参考、不参与构建。
+渲染进程由原生 DOM + jQuery 迁移为 **React 19 + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui**，主进程仍保持 CommonJS 架构。
 
 - 新增 `app://` 自定义协议加载产物（`file://` 下 ES module 会被 CORS 拦截，React 不会执行）
 - 新增 `media://` 受限代理，用于渲染用户自选的壁纸/图标/海报（仅放行图片扩展名）
@@ -98,7 +98,6 @@ src/                 渲染进程（React + TypeScript）
   lib/               gacha.ts（抽卡统计算法）、chart-color.ts、format.ts、utils.ts
   pages/             主页 / 游戏库 / 游戏工具 / 设置 / 抽卡模块
   windows/dataSync/  数据同步窗口（独立 Vite 入口）
-legacy/              原项目重构前的页面与脚本，仅作参考，不参与构建
 scripts/screenshot.js 开发期 UI 截图工具
 ```
 

@@ -38,13 +38,20 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
   );
 }
 
-function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
+interface TabsContentProps extends React.ComponentProps<typeof TabsPrimitive.Content> {
+  /**
+   * 隐藏时保留在 DOM 中。给图表这类 canvas 用：卸载销毁后切回来要重建，
+   * 异步数据回来时容易空白。纯内容（列表、表格）不要开——常驻挂载
+   * 会让父组件每次渲染都重算一遍所有隐藏 Tab 的内容。
+   */
+  forceMount?: true;
+}
+
+function TabsContent({ className, forceMount, ...props }: TabsContentProps) {
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
-      // 隐藏时保留在 DOM 中：图表等 canvas 一旦被卸载销毁，
-      // 切回来需要重建，异步数据回来时容易出现空白
-      forceMount
+      forceMount={forceMount}
       className={cn(
         'flex-1 outline-none data-[state=inactive]:hidden',
         className,

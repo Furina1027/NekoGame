@@ -105,9 +105,10 @@ export type TrendGranularity = 'daily' | 'monthly';
 
 /* ------------------------------------------------------------------ 运行态 */
 
-export interface RunningStatus {
-  running: boolean;
-  games: Game[];
+/** 主进程 gameTracker 每 15 秒广播的运行状态负载 */
+export interface RunningGame {
+  id: number;
+  isRunning: boolean;
 }
 
 /* ------------------------------------------------------------------ 背景 */

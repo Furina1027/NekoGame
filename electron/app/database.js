@@ -3,11 +3,15 @@ const path = require('path');
 const dayjs = require('dayjs');
 const timezone = require('dayjs/plugin/timezone');
 const utc = require('dayjs/plugin/utc');
-const { ipcRenderer } = require('electron');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const chinaTimezone = 'Asia/Shanghai';
+
+// 全库统一的时间格式（本地墙钟）。之前 start_time 写本地格式、
+// endSession 写 ISO 格式，字符串比较永远错位，派生出多条死逻辑。
+const TIME_FORMAT = 'YYYY-MM-DD HH:mm:ss';
+const nowLocal = () => dayjs().tz(chinaTimezone).format(TIME_FORMAT);
 
 
 // 获取 nekoGameFolderPath
@@ -204,7 +208,17 @@ function initializeDatabase() {
                 console.log("miliastra_gacha table initialized successfully.");
             }
         });
+
+        // 抽卡表按 (uid, gacha_type) 过滤、DISTINCT uid、GROUP BY uid 都很频繁，
+        // 没有索引时全部走全表扫描（记录可达数万行）
+        for (const table of ['genshin_gacha', 'starRail_gacha', 'zzz_gacha', 'miliastra_gacha']) {
+            db2.run(`CREATE INDEX IF NOT EXISTS idx_${table}_uid_type ON ${table} (uid, gacha_type)`, (err) => {
+                if (err) console.error("Error creating gacha index:", err.message);
+            });
+        }
     });
+    // 上次运行异常退出遗留的进行中会话，启动时统一收口
+    closeOrphanSessions();
 }
 
 
@@ -292,12 +306,14 @@ function getGameTrendData(gameId, callback) {
 
 
 function startSession(gameId, callback) {
-    const startTime = dayjs().tz(chinaTimezone).format('YYYY-MM-DD HH:mm:ss');
-    const initialDuration = 0;
+    const startTime = nowLocal();
+    // 进行中的会话 end_time 留空，由 gameTracker 每 15 秒推进；
+    // 之前把 end_time 预填成 start_time，导致 endSession 的
+    // `WHERE end_time IS NULL` 永远匹配不到，成了死逻辑
     db.run(`
         INSERT INTO game_sessions (game_id, start_time, end_time, duration)
-        VALUES (?, ?, ?, ?)
-    `, [gameId, startTime, startTime, initialDuration], function (err) {
+        VALUES (?, ?, NULL, NULL)
+    `, [gameId], function (err) {
         if (err) {
             console.error("Error starting session:", err);
             callback(err);
@@ -310,7 +326,9 @@ function startSession(gameId, callback) {
 
 
 function endSession(gameId, callback) {
-    const endTime = new Date().toISOString();
+    // 收尾该游戏所有「还没被 tick 推进过」的会话（游戏退出早于下一次 15 秒 tick 时）。
+    // 已经有 end_time 的会话保持最后一次 tick 的值，它对真实退出时间的偏差不超过一个周期。
+    const endTime = nowLocal();
     db.run(`
         UPDATE game_sessions 
         SET end_time = ?, duration = strftime('%s', ?) - strftime('%s', start_time)
@@ -322,10 +340,21 @@ function endSession(gameId, callback) {
 }
 
 
+// 应用启动时收尾上次异常退出遗留的进行中会话：没有真实结束时间可用，
+// 置为 0 时长（start_time = end_time），交给「检查与整理数据」按空记录清掉
+function closeOrphanSessions() {
+    db.run(`UPDATE game_sessions SET end_time = start_time, duration = 0 WHERE end_time IS NULL`, (err) => {
+        if (err) console.error("Error closing orphan sessions:", err.message);
+    });
+}
+
+
 // 查询游戏时长数据
 function getGameTimeData(callback) {
-    const todayStart = dayjs().tz(chinaTimezone).startOf('day').toISOString();
-    const twoWeeksAgo = dayjs().tz(chinaTimezone).subtract(14, 'days').toISOString();
+    // 与 start_time 同格式的本地时间边界，字符串比较才有效；
+    // 之前传 ISO 格式（带 T/Z），和本地格式比较在日期相同的时刻会全部判错
+    const todayStart = dayjs().tz(chinaTimezone).startOf('day').format(TIME_FORMAT);
+    const twoWeeksAgo = dayjs().tz(chinaTimezone).subtract(14, 'days').format(TIME_FORMAT);
 
     db.all(`
         SELECT 
@@ -353,9 +382,21 @@ function getGameTimeData(callback) {
 }
 
 function deleteGame(gameId, callback) {
-    db.run(`DELETE FROM games WHERE id = ?`, [gameId], function (err) {
-        if (err) return callback(err);
-        db.run(`DELETE FROM game_sessions WHERE game_id = ?`, [gameId], callback);
+    // games 与 game_sessions 分两条删，包进事务：任一条失败时不留孤儿 session
+    db.serialize(() => {
+        let firstError = null;
+        db.run('BEGIN');
+        db.run(`DELETE FROM games WHERE id = ?`, [gameId], (err) => {
+            firstError = firstError ?? err;
+        });
+        db.run(`DELETE FROM game_sessions WHERE game_id = ?`, [gameId], (err) => {
+            firstError = firstError ?? err;
+            if (firstError) {
+                db.run('ROLLBACK', () => callback(firstError));
+            } else {
+                db.run('COMMIT', (commitErr) => callback(commitErr ?? null));
+            }
+        });
     });
 }
 
@@ -376,13 +417,14 @@ function updateGame(gameData, callback) {
 
 //获取过去半年的每日游戏时长数据
 function getGameDailyTimeData(gameId, callback) {
+    const sixMonthsAgo = dayjs().tz(chinaTimezone).subtract(6, 'months').format(TIME_FORMAT);
     db.all(`
         SELECT start_time, SUM(duration) AS total_time
         FROM game_sessions
-        WHERE game_id = ? AND start_time >= datetime('now', '-6 months')
+        WHERE game_id = ? AND start_time >= ?
         GROUP BY DATE(start_time)
         ORDER BY start_time ASC
-    `, [gameId], (err, rows) => {
+    `, [gameId, sixMonthsAgo], (err, rows) => {
         if (err) {
             console.error("Error fetching daily time data:", err);
             callback(err);
@@ -428,11 +470,27 @@ function getGameAverageDailyTimeData(gameId, callback) {
 
 
 
+/**
+ * 关闭两个数据库连接。替换/复制数据库文件前必须先关闭：
+ * SQLite 连接持有页缓存与文件句柄，直接字节覆写正在使用的库文件极易损坏。
+ * 注意关闭后模块级 db/db2 引用失效，调用方随后应重启应用（app.relaunch）。
+ */
+function closeDatabases() {
+    const close = (database) => new Promise((resolve) => database.close((err) => {
+        if (err) console.error('关闭数据库失败:', err.message);
+        resolve();
+    }));
+    return Promise.all([close(db2), close(db)]);
+}
+
+
 // 导出数据库实例和初始化函数
 module.exports = {
     db,
     db2,
     initializeDatabase,
+    closeDatabases,
+    closeOrphanSessions,
     addGame,
     startSession,
     endSession,

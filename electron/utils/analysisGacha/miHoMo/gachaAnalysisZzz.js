@@ -1,8 +1,7 @@
-const { db2 } = require('../../../app/database');
-const { get } = require("axios");
-const db = db2;
 const {fetchGachaRecords} = require("./fetchGacha");
 const {getZZZUrl} = require("./getZZZUrl");
+const { insertGachaLogs } = require("./insertGacha");
+const { getGacha } = require('../../mihoyo/http');
 
 // 定义祈愿类型映射
 const GACHA_TYPE_MAP = {
@@ -13,32 +12,6 @@ const GACHA_TYPE_MAP = {
     "1001": "常驻频段",
     "5001": "邦布频段"
 };
-
-async function insertGachaLogs(logs) {
-    let insertedCount = 0;
-    const insertPromises = logs.map(log => {
-        return new Promise((resolve, reject) => {
-            const { id, uid, gacha_id, gacha_type, item_id, count, time, name, lang, item_type, rank_type } = log;
-            db.run(`INSERT OR IGNORE INTO zzz_gacha (id, uid, gacha_id, gacha_type, item_id, count, time, name, lang, item_type, rank_type) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [id, uid, gacha_id, gacha_type, item_id, count, time, name, lang, item_type, rank_type], function (err) {
-                        if (err) {
-                            reject(`插入失败: ${err.message}`);
-                        } else {
-                            if (this.changes > 0) {
-                                insertedCount++;
-                            }
-                            resolve();
-                        }
-                    });
-        });
-    });
-    // 等待所有插入操作完成
-    await Promise.all(insertPromises);
-    console.log(`成功插入 ${insertedCount} 条数据`);
-    return insertedCount;
-}
-
 
 async function fetchZzzGachaData(event) {
     // 获取抽卡记录链接
@@ -51,13 +24,14 @@ async function fetchZzzGachaData(event) {
 
     const gachaUrl = result.message.split('\n')[1].trim();
     console.log(`获取的抽卡记录链接: ${gachaUrl}`);
-    global.Notify(true, `已获取抽卡记录并复制到剪贴板\n${gachaUrl}`);
+    // 通知走 WebSocket，链接里的 authkey 等同于账号凭据，由 Notify 统一打码
+    global.Notify(true, '已获取抽卡记录并复制到剪贴板');
     // 获取祈愿日志数据
     try {
         const allRecords = { '2001': [], '3001': [],'12001': [] ,'13001': [] , '1001': [], '5001': [] };
         let totalFetched = await fetchZzzGachaRecords(allRecords,GACHA_TYPE_MAP,gachaUrl,event);
         // 插入查询到的所有数据
-        const totalInserted = await insertGachaLogs(allRecords['2001'].concat(allRecords['3001'],allRecords['12001'],allRecords['13001'], allRecords['1001'], allRecords['5001']));
+        const totalInserted = await insertGachaLogs('zzz_gacha', allRecords['2001'].concat(allRecords['3001'],allRecords['12001'],allRecords['13001'], allRecords['1001'], allRecords['5001']));
         event.sender.send('gacha-records-status', `查询到的抽卡记录: ${totalFetched} 条,成功插入: ${totalInserted} 条`);
         return { success: true, message: `查询到的抽卡记录: ${totalFetched} 条\n成功插入: ${totalInserted} 条`};
     } catch (error) {
@@ -97,8 +71,8 @@ async function fetchZzzGachaRecords(allRecords, GACHA_TYPE_MAP, gachaUrl, event)
                     'gacha-records-status',
                     `获取 ${gachaName} 第 ${page} 页数据...`
                 );
-                const response = await get(urlWithParams);
-                const data = response.data;
+                // 走带 15s 超时的封装：全局 axios 默认无超时，接口挂起会卡死整个刷新
+                const data = await getGacha(urlWithParams);
 
                 console.log('回应数据', JSON.stringify(data));
 

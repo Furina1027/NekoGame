@@ -69,35 +69,59 @@ async function importUIGFData(filePath, tableName, gameKey, fetchItemIdFn, gameT
     }
 }
 
-async function insertUIGF(query, insertedCount, uid, lang, fetchItemIdFn, list){
-    for (const record of list) {
-        const recordData = { ...record, uid, lang };
-        // 检查字段完整性
-        checkUIGF(recordData.id, recordData.uid, recordData.gacha_type, recordData.time, recordData.rank_type, recordData);
-        // 补充 item_id 如果缺失
-        if (!recordData.item_id && recordData.name && fetchItemIdFn) {
+/** 并行限流地补齐缺失的 item_id：之前一条一条串行等网络，大文件导入要慢上数倍 */
+async function fillItemIds(records, fetchItemIdFn) {
+    const missing = records.filter((r) => !r.item_id && r.name);
+    const CONCURRENCY = 5;
+    for (let i = 0; i < missing.length; i += CONCURRENCY) {
+        await Promise.all(missing.slice(i, i + CONCURRENCY).map(async (recordData) => {
             try {
                 recordData.item_id = await fetchItemIdFn(recordData.name);
             } catch (err) {
-                global.Notify(false, `获取 item_id 失败: ${recordData.name}\n已跳过此记录\n 错误: ${err.message}`)
+                global.Notify(false, `获取 item_id 失败: ${recordData.name}\n已跳过此记录\n 错误: ${err.message}`);
                 console.warn(`获取 item_id 失败: ${recordData.name}, 错误: ${err.message}`);
-                continue;
+                recordData.__skip = true;
             }
-        }
-        // 插入数据
-        const values = UIGF_FIELDS.map(field => recordData[field] || "");
-        await new Promise((resolve, reject) => {
-            db2.run(query, values, function (err) {
-                if (err) {
-                    reject(`插入失败: ${err.message}`);
+        }));
+    }
+}
+
+async function insertUIGF(query, insertedCount, uid, lang, fetchItemIdFn, list){
+    const records = list.map((record) => ({ ...record, uid, lang }));
+
+    // 字段完整性先整体校验，避免导到一半才在坏记录上失败
+    for (const recordData of records) {
+        checkUIGF(recordData.id, recordData.uid, recordData.gacha_type, recordData.time, recordData.rank_type, recordData);
+    }
+    await fillItemIds(records, fetchItemIdFn);
+    const valid = records.filter((r) => !r.__skip);
+    if (valid.length === 0) return insertedCount;
+
+    // 单个事务批量落盘：逐条 autocommit 每条都 fsync 一次，大文件导入主进程会卡到分钟级
+    return new Promise((resolve, reject) => {
+        let inserted = 0;
+        let failure = null;
+        db2.serialize(() => {
+            db2.run('BEGIN');
+            const stmt = db2.prepare(query);
+            for (const recordData of valid) {
+                stmt.run(UIGF_FIELDS.map((field) => recordData[field] || ""), function (err) {
+                    if (err) {
+                        failure = failure ?? err;
+                    } else if (this.changes > 0) {
+                        inserted++;
+                    }
+                });
+            }
+            stmt.finalize(() => {
+                if (failure) {
+                    db2.run('ROLLBACK', () => reject(failure));
                 } else {
-                    if (this.changes > 0) insertedCount++;
-                    resolve();
+                    db2.run('COMMIT', (err) => (err ? reject(err) : resolve(insertedCount + inserted)));
                 }
             });
         });
-    }
-    return insertedCount;
+    });
 }
 
 ipcMain.handle('import-genshin-data', async () => {

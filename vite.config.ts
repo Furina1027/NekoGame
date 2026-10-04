@@ -25,7 +25,8 @@ export default defineConfig({
     // CSS 必须单独指定目标：默认的 Lightning CSS 会把标准 backdrop-filter
     // 降级成只剩 -webkit- 前缀，Chromium 130 不认，磨砂和遮罩会整体失效。
     cssTarget: 'chrome130',
-    sourcemap: true,
+    // 发布版会带 out/** 全量进安装包，sourcemap 等于把源码一起发出去
+    sourcemap: false,
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       input: {
