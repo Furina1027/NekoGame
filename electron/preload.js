@@ -70,7 +70,6 @@ const LISTEN_CHANNELS = new Set([
   'gacha-records-status',
   // 命名方法内部也走 subscribe()，这些通道同样要在白名单里
   'window-maximized-changed',
-  'game-data-updated',
   'running-status-updated',
   'background-settings',
 ]);
@@ -132,7 +131,6 @@ const api = {
   getGameDailyTimeData: (gameId) => ipcRenderer.invoke('get-game-daily-time-data', gameId),
   getGameTimeData: () => ipcRenderer.invoke('get-game-time-data'),
   launchGame: (gamePath) => ipcRenderer.invoke('launch-game', gamePath),
-  onGameDataUpdated: (callback) => subscribe('game-data-updated', callback),
   onRunningStatusUpdated: (callback) => subscribe('running-status-updated', callback),
 
   // ---- 文件选择 ----

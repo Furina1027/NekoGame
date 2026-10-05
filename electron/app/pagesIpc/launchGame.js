@@ -1,4 +1,4 @@
-const { ipcMain } = require('electron');
+const { ipcMain, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -9,11 +9,26 @@ ipcMain.handle('launch-game', (event, gamePath) => {
     if (typeof gamePath !== 'string' || !gamePath) {
         return Promise.reject(new Error('游戏路径无效'));
     }
-    // 不经过任何 shell：之前用 PowerShell 的 Start-Process 拼接路径，
-    // 路径里的引号可以被闭合逃逸成任意命令执行。
-    if (!fs.existsSync(gamePath) || path.extname(gamePath).toLowerCase() !== '.exe') {
-        return Promise.reject(new Error('游戏路径不存在或不是 exe 主程序'));
+    if (!fs.existsSync(gamePath)) {
+        return Promise.reject(new Error('游戏路径不存在'));
     }
+
+    // 之前用 exec(`Start-Process -FilePath "${gamePath}"`) 拼命令串，
+    // 路径里的引号可以被闭合逃逸成任意命令执行。现在两条路径都不经过命令解析：
+    //   .exe  → spawn 直接 CreateProcess
+    //   其它  → shell.openPath 交给 ShellExecute（快捷方式、启动器等）
+    // openPath 传的是路径本身而不是命令行，所以同样不存在注入面。
+    if (path.extname(gamePath).toLowerCase() !== '.exe') {
+        return shell.openPath(gamePath).then((errMsg) => {
+            if (errMsg) {
+                console.error(`启动游戏失败: ${errMsg}`);
+                return Promise.reject(new Error(errMsg));
+            }
+            console.log(`游戏启动成功: ${gamePath}`);
+            return true;
+        });
+    }
+
     return new Promise((resolve, reject) => {
         spawn(gamePath, [], {
             detached: true,

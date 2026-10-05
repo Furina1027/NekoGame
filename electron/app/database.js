@@ -313,7 +313,7 @@ function startSession(gameId, callback) {
     db.run(`
         INSERT INTO game_sessions (game_id, start_time, end_time, duration)
         VALUES (?, ?, NULL, NULL)
-    `, [gameId], function (err) {
+    `, [gameId, startTime], function (err) {
         if (err) {
             console.error("Error starting session:", err);
             callback(err);

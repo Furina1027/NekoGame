@@ -164,23 +164,28 @@ async function restoreDatabasesFromRepo(repoUrl, token) {
         stopGameTracking();
         await closeDatabases();
 
-        const leftovers = [];
+        const movedBackups = [];
+        const swappedIn = [];
         try {
             for (const { tmpPath, localPath } of tmpFiles) {
                 // 先把旧文件挪走再换上新文件：替换中途出错可以整体回滚
                 const backupPath = `${localPath}.replacing`;
                 if (fs.existsSync(localPath)) {
                     fs.renameSync(localPath, backupPath);
-                    leftovers.push(backupPath);
+                    movedBackups.push(backupPath);
                 }
                 fs.renameSync(tmpPath, localPath);
+                swappedIn.push(localPath);
             }
         } catch (error) {
             console.error('替换数据库失败，尝试回滚:', error);
-            for (const { localPath } of tmpFiles) {
+            // 只清理真正换上去了的那些文件。没换成功的 localPath 要原样保留，
+            // 早先的写法对所有 tmpFiles 无差别 rmSync，会在还没有回滚文件可用的
+            // 情况下把原库删掉。
+            for (const localPath of swappedIn) {
                 try { fs.rmSync(localPath, { force: true }); } catch { /* 忽略 */ }
             }
-            for (const backupPath of leftovers) {
+            for (const backupPath of movedBackups) {
                 try { fs.renameSync(backupPath, backupPath.replace(/\.replacing$/, '')); } catch { /* 忽略 */ }
             }
             eventSafeNotify(false, `替换数据库失败: ${error.message}`);
@@ -189,7 +194,7 @@ async function restoreDatabasesFromRepo(repoUrl, token) {
         }
 
         // 替换成功，清掉挪走的旧文件
-        for (const backupPath of leftovers) {
+        for (const backupPath of movedBackups) {
             try { fs.rmSync(backupPath, { force: true }); } catch { /* 忽略 */ }
         }
         app.relaunch();

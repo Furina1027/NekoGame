@@ -7,18 +7,19 @@ require('./app/settings/dataFile');
 require("./app/console");  // 导入日志管理
 require('./utils/syncMessage'); //导入消息通知
 
-// 主进程不允许带着未处理异常静默跑飞：记进日志，用户反馈时才有迹可循
+// 未处理的 Promise 拒绝只记日志：这类错误多数来自网络/剪贴板等旁路，
+// 直接带崩主进程得不偿失。真出问题时日志里有据可查。
 process.on('unhandledRejection', (reason) => {
     console.error('[unhandledRejection]', reason);
 });
-process.on('uncaughtException', (err) => {
-    console.error('[uncaughtException]', err);
-});
+// uncaughtException 刻意不吞：吞掉之后主进程会在半损坏状态下继续跑，
+// 表面"不崩了"，实际是数据/句柄都已经不可信。走 Electron 默认的报错并退出。
 
 
 const { initializeDatabase, getSetting, setSetting} = require('./app/database');
 const { startGameTracking, sendRunningStatus } = require('./app/gameTracker');
 const { isTrustedSender } = require('./app/trustedSender');
+const { persistHardwareAcceleration } = require('./app/settings/hardwareAcceleration');
 const gotTheLock = app.requestSingleInstanceLock();
 
 // 开发模式下由 Vite dev server 提供渲染进程
@@ -277,6 +278,11 @@ ipcMain.handle("save-setting", (event, key, value) => {
         } else {
             if (key === "minimizeToTray") {
                 minimizeToTraySetting = value === "true";
+            }
+            // 硬件加速的启动标记：用户改了这里要同步写盘，
+            // 否则下次启动的同步快路径读到的是旧值
+            if (key === "hardwareAcceleration") {
+                persistHardwareAcceleration(value === "true");
             }
         }
     });

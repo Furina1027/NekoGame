@@ -30,7 +30,6 @@ export interface ElectronAPI {
   getGameDailyTimeData(gameId: number): Promise<DailyTimePoint[]>;
   getGameTimeData(): Promise<Game[]>;
   launchGame(gamePath: string): Promise<void>;
-  onGameDataUpdated(cb: (data: unknown) => void): () => void;
   /** 主进程每 15 秒广播一次：正在运行的游戏 id 列表 */
   onRunningStatusUpdated(cb: (games: RunningGame[]) => void): () => void;
 
